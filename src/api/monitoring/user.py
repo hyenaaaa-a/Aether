@@ -1,0 +1,148 @@
+"""普通用户可访问的监控与审计端点。"""
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
+
+from src.api.base.adapter import ApiAdapter, ApiMode
+from src.api.base.pagination import PaginationMeta, build_pagination_payload, paginate_query
+from src.api.base.pipeline import ApiRequestPipeline
+from src.core.logger import logger
+from src.database import get_db
+from src.models.database import ApiKey, AuditLog
+from src.plugins.manager import get_plugin_manager
+
+router = APIRouter(prefix="/api/monitoring", tags=["Monitoring"])
+pipeline = ApiRequestPipeline()
+
+
+@router.get("/my-audit-logs")
+async def get_my_audit_logs(
+    request: Request,
+    event_type: Optional[str] = Query(None, description="事件类型筛选"),
+    days: int = Query(30, description="查询天数"),
+    limit: int = Query(50, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db: Session = Depends(get_db),
+):
+    adapter = UserAuditLogsAdapter(event_type=event_type, days=days, limit=limit, offset=offset)
+    return await pipeline.run(adapter=adapter, http_request=request, db=db, mode=adapter.mode)
+
+
+@router.get("/rate-limit-status")
+async def get_rate_limit_status(request: Request, db: Session = Depends(get_db)):
+    adapter = UserRateLimitStatusAdapter()
+    return await pipeline.run(adapter=adapter, http_request=request, db=db, mode=adapter.mode)
+
+
+class AuthenticatedApiAdapter(ApiAdapter):
+    """需要用户登录的适配器基类。"""
+
+    mode = ApiMode.USER
+
+    def authorize(self, context):  # type: ignore[override]
+        if not context.user:
+            raise HTTPException(status_code=401, detail="未登录")
+
+
+@dataclass
+class UserAuditLogsAdapter(AuthenticatedApiAdapter):
+    event_type: Optional[str]
+    days: int
+    limit: int
+    offset: int
+
+    async def handle(self, context):  # type: ignore[override]
+        db = context.db
+        user = context.user
+        if not user:
+            raise HTTPException(status_code=401, detail="未登录")
+
+        query = db.query(AuditLog).filter(AuditLog.user_id == user.id)
+        if self.event_type:
+            query = query.filter(AuditLog.event_type == self.event_type)
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=self.days)
+        query = query.filter(AuditLog.created_at >= cutoff_time)
+        query = query.order_by(AuditLog.created_at.desc())
+
+        total, logs = paginate_query(query, self.limit, self.offset)
+
+        items = [
+            {
+                "id": log.id,
+                "event_type": log.event_type,
+                "description": log.description,
+                "ip_address": log.ip_address,
+                "status_code": log.status_code,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in logs
+        ]
+
+        meta = PaginationMeta(
+            total=total,
+            limit=self.limit,
+            offset=self.offset,
+            count=len(items),
+        )
+
+        return build_pagination_payload(
+            items,
+            meta,
+            filters={
+                "event_type": self.event_type,
+                "days": self.days,
+            },
+        )
+
+
+class UserRateLimitStatusAdapter(AuthenticatedApiAdapter):
+    async def handle(self, context):  # type: ignore[override]
+        db = context.db
+        user = context.user
+        if not user:
+            raise HTTPException(status_code=401, detail="未登录")
+
+        rate_limiter = _get_rate_limit_plugin()
+        if not rate_limiter or not hasattr(rate_limiter, "get_rate_limit_headers"):
+            raise HTTPException(status_code=503, detail="速率限制插件未启用或不支持状态查询")
+
+        api_keys = (
+            db.query(ApiKey)
+            .filter(ApiKey.user_id == user.id, ApiKey.is_active.is_(True))
+            .order_by(ApiKey.created_at.desc())
+            .all()
+        )
+
+        rate_limit_info = []
+        for key in api_keys:
+            try:
+                headers = rate_limiter.get_rate_limit_headers(key)
+            except Exception as exc:
+                logger.warning(f"无法获取Key {key.id} 的限流信息: {exc}")
+                headers = {}
+
+            rate_limit_info.append(
+                {
+                    "api_key_name": key.name or f"Key-{key.id}",
+                    "limit": headers.get("X-RateLimit-Limit"),
+                    "remaining": headers.get("X-RateLimit-Remaining"),
+                    "reset_time": headers.get("X-RateLimit-Reset"),
+                    "window": headers.get("X-RateLimit-Window"),
+                }
+            )
+
+        return {"user_id": user.id, "api_keys": rate_limit_info}
+
+
+def _get_rate_limit_plugin():
+    try:
+        plugin_manager = get_plugin_manager()
+        return plugin_manager.get_plugin("rate_limit")
+    except Exception as exc:
+        logger.warning(f"获取速率限制插件失败: {exc}")
+        return None

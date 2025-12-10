@@ -1,0 +1,136 @@
+import { ref, computed, type Ref, watch } from 'vue'
+import type { UsageRecord, FilterStatusValue } from '../types'
+
+export interface UseUsageFiltersOptions {
+  /** 所有记录的响应式引用 */
+  allRecords: Ref<UsageRecord[]>
+  /** 当筛选变化时的回调 */
+  onFilterChange?: () => void
+}
+
+export function useUsageFilters(options: UseUsageFiltersOptions) {
+  const { allRecords, onFilterChange } = options
+
+  // 筛选状态
+  const filterModel = ref('__all__')
+  const filterProvider = ref('__all__')
+  const filterStatus = ref<FilterStatusValue>('__all__')
+
+  // Select 打开状态
+  const filterModelSelectOpen = ref(false)
+  const filterProviderSelectOpen = ref(false)
+  const filterStatusSelectOpen = ref(false)
+
+  // 可用模型和提供商选项
+  const availableModels = computed(() => {
+    const models = new Set<string>()
+    allRecords.value.forEach(record => {
+      if (record.model) models.add(record.model)
+    })
+    return Array.from(models).sort()
+  })
+
+  const availableProviders = computed(() => {
+    const providers = new Set<string>()
+    allRecords.value.forEach(record => {
+      if (record.provider) providers.add(record.provider)
+    })
+    return Array.from(providers).sort()
+  })
+
+  // 是否有活跃的筛选条件
+  const hasActiveFilters = computed(() => {
+    return filterModel.value !== '__all__' ||
+           filterProvider.value !== '__all__' ||
+           filterStatus.value !== '__all__'
+  })
+
+  // 筛选后的记录
+  const filteredRecords = computed(() => {
+    if (!hasActiveFilters.value) {
+      return allRecords.value
+    }
+
+    let records = [...allRecords.value]
+
+    if (filterModel.value !== '__all__') {
+      records = records.filter(record => record.model === filterModel.value)
+    }
+
+    if (filterProvider.value !== '__all__') {
+      records = records.filter(record => record.provider === filterProvider.value)
+    }
+
+    if (filterStatus.value !== '__all__') {
+      if (filterStatus.value === 'stream') {
+        records = records.filter(record =>
+          record.is_stream && !record.error_message && (!record.status_code || record.status_code === 200)
+        )
+      } else if (filterStatus.value === 'standard') {
+        records = records.filter(record =>
+          !record.is_stream && !record.error_message && (!record.status_code || record.status_code === 200)
+        )
+      } else if (filterStatus.value === 'error') {
+        records = records.filter(record =>
+          record.error_message || (record.status_code && record.status_code >= 400)
+        )
+      }
+    }
+
+    return records
+  })
+
+  // 筛选后的总记录数
+  const filteredTotalRecords = computed(() => filteredRecords.value.length)
+
+  // 处理筛选变化
+  function handleFilterModelChange(value: string) {
+    filterModel.value = value
+    onFilterChange?.()
+  }
+
+  function handleFilterProviderChange(value: string) {
+    filterProvider.value = value
+    onFilterChange?.()
+  }
+
+  function handleFilterStatusChange(value: string) {
+    filterStatus.value = value as FilterStatusValue
+    onFilterChange?.()
+  }
+
+  // 重置所有筛选
+  function resetFilters() {
+    filterModel.value = '__all__'
+    filterProvider.value = '__all__'
+    filterStatus.value = '__all__'
+    onFilterChange?.()
+  }
+
+  return {
+    // 筛选状态
+    filterModel,
+    filterProvider,
+    filterStatus,
+
+    // Select 打开状态
+    filterModelSelectOpen,
+    filterProviderSelectOpen,
+    filterStatusSelectOpen,
+
+    // 可用选项
+    availableModels,
+    availableProviders,
+
+    // 计算属性
+    hasActiveFilters,
+    filteredRecords,
+    filteredTotalRecords,
+
+    // 方法
+    handleFilterModelChange,
+    handleFilterProviderChange,
+    handleFilterStatusChange,
+    resetFilters
+  }
+}

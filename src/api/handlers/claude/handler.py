@@ -1,0 +1,150 @@
+"""
+Claude Chat Handler - 基于通用 Chat Handler 基类的简化实现
+
+继承 ChatHandlerBase，只需覆盖格式特定的方法。
+代码量从原来的 ~1470 行减少到 ~120 行。
+"""
+
+from typing import Any, Dict, Optional
+
+from src.api.handlers.base.chat_handler_base import ChatHandlerBase
+
+
+class ClaudeChatHandler(ChatHandlerBase):
+    """
+    Claude Chat Handler - 处理 Claude Chat/CLI API 格式的请求
+
+    格式特点：
+    - 使用 input_tokens/output_tokens
+    - 支持 cache_creation_input_tokens/cache_read_input_tokens
+    - 请求格式：ClaudeMessagesRequest
+    """
+
+    FORMAT_ID = "CLAUDE"
+
+    def extract_model_from_request(
+        self,
+        request_body: Dict[str, Any],
+        path_params: Optional[Dict[str, Any]] = None,  # noqa: ARG002
+    ) -> str:
+        """
+        从请求中提取模型名 - Claude 格式实现
+
+        Claude API 的 model 在请求体顶级字段。
+
+        Args:
+            request_body: 请求体
+            path_params: URL 路径参数（Claude 不使用）
+
+        Returns:
+            模型名
+        """
+        model = request_body.get("model")
+        return str(model) if model else "unknown"
+
+    def apply_mapped_model(
+        self,
+        request_body: Dict[str, Any],
+        mapped_model: str,
+    ) -> Dict[str, Any]:
+        """
+        将映射后的模型名应用到请求体
+
+        Claude API 的 model 在请求体顶级字段。
+
+        Args:
+            request_body: 原始请求体
+            mapped_model: 映射后的模型名
+
+        Returns:
+            更新了 model 字段的请求体
+        """
+        result = dict(request_body)
+        result["model"] = mapped_model
+        return result
+
+    async def _convert_request(self, request):
+        """
+        将请求转换为 Claude 格式
+
+        Args:
+            request: 原始请求对象
+
+        Returns:
+            ClaudeMessagesRequest 对象
+        """
+        from src.api.handlers.claude.converter import OpenAIToClaudeConverter
+        from src.models.claude import ClaudeMessagesRequest
+        from src.models.openai import OpenAIRequest
+
+        # 如果已经是 Claude 格式，直接返回
+        if isinstance(request, ClaudeMessagesRequest):
+            return request
+
+        # 如果是 OpenAI 格式，转换为 Claude 格式
+        if isinstance(request, OpenAIRequest):
+            converter = OpenAIToClaudeConverter()
+            claude_dict = converter.convert_request(request.dict())
+            return ClaudeMessagesRequest(**claude_dict)
+
+        # 如果是字典，根据内容判断格式
+        if isinstance(request, dict):
+            if "messages" in request and len(request["messages"]) > 0:
+                first_msg = request["messages"][0]
+                if "role" in first_msg and "content" in first_msg:
+                    # 可能是 OpenAI 格式
+                    converter = OpenAIToClaudeConverter()
+                    claude_dict = converter.convert_request(request)
+                    return ClaudeMessagesRequest(**claude_dict)
+
+            # 否则假设已经是 Claude 格式
+            return ClaudeMessagesRequest(**request)
+
+        return request
+
+    def _extract_usage(self, response: Dict) -> Dict[str, int]:
+        """
+        从 Claude 响应中提取 token 使用情况
+
+        Claude 格式使用：
+        - input_tokens / output_tokens
+        - cache_creation_input_tokens / cache_read_input_tokens
+        """
+        usage = response.get("usage", {})
+
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
+        cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
+
+        # 处理新的 cache_creation 格式
+        if "cache_creation" in usage:
+            cache_creation_data = usage.get("cache_creation", {})
+            if not cache_creation_input_tokens:
+                cache_creation_input_tokens = cache_creation_data.get(
+                    "ephemeral_5m_input_tokens", 0
+                ) + cache_creation_data.get("ephemeral_1h_input_tokens", 0)
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+        }
+
+    def _normalize_response(self, response: Dict) -> Dict:
+        """
+        规范化 Claude 响应
+
+        Args:
+            response: 原始响应
+
+        Returns:
+            规范化后的响应
+        """
+        if self.response_normalizer and self.response_normalizer.should_normalize(response):
+            return self.response_normalizer.normalize_claude_response(
+                response_data=response,
+                request_id=self.request_id,
+            )
+        return response

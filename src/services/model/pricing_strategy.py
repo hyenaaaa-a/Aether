@@ -1,0 +1,48 @@
+"""
+计费相关数据类
+
+定义计费计算所需的数据结构。
+实际的计费逻辑已移至 ChatAdapterBase，每种 API 格式可以覆盖计费方法。
+
+数据类：
+- UsageTokens: 请求的 token 使用量
+- PricingConfig: 价格配置
+- CostResult: 计费结果
+"""
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class UsageTokens:
+    """请求的 token 使用量"""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+@dataclass
+class PricingConfig:
+    """价格配置"""
+    input_price_per_1m: float = 0.0
+    output_price_per_1m: float = 0.0
+    cache_creation_price_per_1m: Optional[float] = None
+    cache_read_price_per_1m: Optional[float] = None
+    price_per_request: Optional[float] = None
+    tiered_pricing: Optional[dict] = None
+    cache_ttl_minutes: Optional[int] = None
+
+
+@dataclass
+class CostResult:
+    """计费结果"""
+    input_cost: float = 0.0
+    output_cost: float = 0.0
+    cache_creation_cost: float = 0.0
+    cache_read_cost: float = 0.0
+    cache_cost: float = 0.0
+    request_cost: float = 0.0
+    total_cost: float = 0.0
+    tier_index: Optional[int] = None  # 命中的阶梯索引
