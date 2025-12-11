@@ -21,19 +21,20 @@
                     {{ model.is_active ? '活跃' : '停用' }}
                   </Badge>
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-sm text-muted-foreground font-mono">{{ model.name }}</span>
+                <div class="flex items-center gap-2 text-sm text-muted-foreground min-w-0">
+                  <span class="font-mono shrink-0">{{ model.name }}</span>
                   <button
-                    class="p-0.5 rounded hover:bg-muted transition-colors"
+                    class="p-0.5 rounded hover:bg-muted transition-colors shrink-0"
                     title="复制模型 ID"
                     @click="copyToClipboard(model.name)"
                   >
-                    <Copy class="w-3 h-3 text-muted-foreground" />
+                    <Copy class="w-3 h-3" />
                   </button>
+                  <template v-if="model.description">
+                    <span class="shrink-0">·</span>
+                    <span class="text-xs truncate" :title="model.description">{{ model.description }}</span>
+                  </template>
                 </div>
-                <p v-if="model.description" class="text-xs text-muted-foreground">
-                  {{ model.description }}
-                </p>
               </div>
               <div class="flex items-center gap-1 shrink-0">
                 <Button variant="ghost" size="icon" @click="$emit('edit-model', model)" title="编辑模型">

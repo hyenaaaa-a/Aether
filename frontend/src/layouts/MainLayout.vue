@@ -101,6 +101,12 @@
              </div>
           </div>
 
+          <!-- Demo Mode Badge (center) -->
+          <div v-if="isDemo" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-xs font-medium">
+            <AlertTriangle class="w-3.5 h-3.5" />
+            <span>演示模式</span>
+          </div>
+
           <div class="flex items-center gap-2">
                <!-- Theme Toggle -->
                <button
@@ -125,6 +131,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDarkMode } from '@/composables/useDarkMode'
+import { isDemoMode } from '@/config/demo'
 import Button from '@/components/ui/button.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import SidebarNav from '@/components/layout/SidebarNav.vue'
@@ -157,6 +164,7 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const { isDark, themeMode, toggleDarkMode } = useDarkMode()
+const isDemo = computed(() => isDemoMode())
 
 const showAuthError = ref(false)
 let authCheckInterval: number | null = null
