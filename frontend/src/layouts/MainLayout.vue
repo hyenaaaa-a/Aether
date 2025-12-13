@@ -1,7 +1,7 @@
 <template>
   <AppShell
     :show-notice="showAuthError"
-    main-class=""
+    :main-class="mainClasses"
     :sidebar-class="sidebarClasses"
     :content-class="contentClasses"
   >
@@ -90,25 +90,156 @@
     </template>
 
     <template #header>
-      <!-- Mobile Header -->
-      <div class="lg:hidden p-4 flex items-center justify-between border-b border-border bg-background/80 backdrop-blur-md">
-        <RouterLink
-          to="/"
-          class="flex items-center gap-2"
+      <!-- Mobile Header (matches Home page style) -->
+      <header class="lg:hidden fixed top-0 left-0 right-0 z-50 border-b border-[#cc785c]/10 dark:border-[rgba(227,224,211,0.12)] bg-[#fafaf7]/90 dark:bg-[#191714]/95 backdrop-blur-xl transition-all">
+        <div class="mx-auto max-w-7xl px-6 py-4">
+          <div class="flex items-center justify-between">
+            <!-- Logo & Brand -->
+            <RouterLink
+              to="/"
+              class="flex items-center gap-3 group"
+            >
+              <HeaderLogo
+                size="h-9 w-9"
+                class-name="text-[#191919] dark:text-white"
+              />
+              <div class="flex flex-col justify-center">
+                <h1 class="text-lg font-bold text-[#191919] dark:text-white leading-none">
+                  Aether
+                </h1>
+                <span class="text-[10px] text-[#91918d] dark:text-muted-foreground leading-none mt-1.5 font-medium tracking-wide">Multi Private Gateway</span>
+              </div>
+            </RouterLink>
+
+            <!-- Right Actions -->
+            <div class="flex items-center gap-3">
+              <button
+                class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition"
+                :title="themeMode === 'system' ? '跟随系统' : themeMode === 'dark' ? '深色模式' : '浅色模式'"
+                @click="toggleDarkMode"
+              >
+                <SunMoon
+                  v-if="themeMode === 'system'"
+                  class="h-4 w-4"
+                />
+                <SunMedium
+                  v-else-if="themeMode === 'light'"
+                  class="h-4 w-4"
+                />
+                <Moon
+                  v-else
+                  class="h-4 w-4"
+                />
+              </button>
+              <button
+                class="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition"
+                @click="mobileMenuOpen = !mobileMenuOpen"
+              >
+                <div class="relative w-5 h-5">
+                  <Transition
+                    enter-active-class="transition-all duration-200 ease-out"
+                    enter-from-class="opacity-0 rotate-90 scale-75"
+                    enter-to-class="opacity-100 rotate-0 scale-100"
+                    leave-active-class="transition-all duration-150 ease-in absolute inset-0"
+                    leave-from-class="opacity-100 rotate-0 scale-100"
+                    leave-to-class="opacity-0 -rotate-90 scale-75"
+                    mode="out-in"
+                  >
+                    <Menu
+                      v-if="!mobileMenuOpen"
+                      class="h-5 w-5"
+                    />
+                    <X
+                      v-else
+                      class="h-5 w-5"
+                    />
+                  </Transition>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile Dropdown Menu -->
+        <Transition
+          enter-active-class="transition-all duration-300 ease-out overflow-hidden"
+          enter-from-class="opacity-0 max-h-0"
+          enter-to-class="opacity-100 max-h-[500px]"
+          leave-active-class="transition-all duration-200 ease-in overflow-hidden"
+          leave-from-class="opacity-100 max-h-[500px]"
+          leave-to-class="opacity-0 max-h-0"
         >
-          <HeaderLogo
-            size="h-8 w-8"
-            class-name="text-[#191919] dark:text-white"
-          />
-          <span class="font-bold text-lg">Aether</span>
-        </RouterLink>
-        <MobileNav
-          :items="navigation"
-          :is-active="isNavActive"
-          :active-path="route.path"
-          :is-dark="isDark"
-        />
-      </div>
+          <div
+            v-if="mobileMenuOpen"
+            class="border-t border-[#cc785c]/10 dark:border-[rgba(227,224,211,0.12)] bg-[#fafaf7]/95 dark:bg-[#191714]/98 backdrop-blur-xl"
+          >
+            <div class="mx-auto max-w-7xl px-6 py-4">
+              <!-- Navigation Groups -->
+              <div class="space-y-4">
+                <div
+                  v-for="group in navigation"
+                  :key="group.title"
+                >
+                  <div
+                    v-if="group.title"
+                    class="text-[10px] font-semibold text-[#91918d] dark:text-muted-foreground uppercase tracking-wider mb-2"
+                  >
+                    {{ group.title }}
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <RouterLink
+                      v-for="item in group.items"
+                      :key="item.href"
+                      :to="item.href"
+                      class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all"
+                      :class="isNavActive(item.href)
+                        ? 'bg-[#cc785c]/10 dark:bg-[#cc785c]/20 text-[#cc785c] dark:text-[#d4a27f]'
+                        : 'text-[#666663] dark:text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-[#191919] dark:hover:text-white'"
+                      @click="mobileMenuOpen = false"
+                    >
+                      <component
+                        :is="item.icon"
+                        class="h-4 w-4 shrink-0"
+                      />
+                      <span class="truncate">{{ item.name }}</span>
+                    </RouterLink>
+                  </div>
+                </div>
+              </div>
+
+              <!-- User Section -->
+              <div class="mt-4 pt-4 border-t border-[#cc785c]/10 dark:border-[rgba(227,224,211,0.12)]">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-full bg-[#f0f0eb] dark:bg-white/10 border border-black/5 flex items-center justify-center text-xs font-bold text-[#3d3929] dark:text-[#d4a27f] shrink-0">
+                      {{ authStore.user?.username?.substring(0, 2).toUpperCase() }}
+                    </div>
+                    <div class="flex flex-col min-w-0">
+                      <span class="text-sm font-semibold leading-none truncate text-[#191919] dark:text-white">{{ authStore.user?.username }}</span>
+                      <span class="text-[10px] text-[#91918d] dark:text-muted-foreground leading-none mt-1">{{ authStore.user?.role === 'admin' ? '管理员' : '用户' }}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <RouterLink
+                      to="/dashboard/settings"
+                      class="p-2 hover:bg-muted/50 rounded-lg text-muted-foreground hover:text-foreground transition-colors"
+                      @click="mobileMenuOpen = false"
+                    >
+                      <Settings class="w-4 h-4" />
+                    </RouterLink>
+                    <button
+                      class="p-2 rounded-lg text-muted-foreground hover:text-red-500 transition-colors"
+                      @click="handleLogout"
+                    >
+                      <LogOut class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </header>
 
       <!-- Desktop Page Header -->
       <header class="hidden lg:flex h-16 px-8 items-center justify-between shrink-0 border-b border-[#3d3929]/5 dark:border-white/5 sticky top-0 z-40 backdrop-blur-md bg-[#faf9f5]/90 dark:bg-[#191714]/90">
@@ -158,7 +289,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDarkMode } from '@/composables/useDarkMode'
@@ -166,7 +297,6 @@ import { isDemoMode } from '@/config/demo'
 import Button from '@/components/ui/button.vue'
 import AppShell from '@/components/layout/AppShell.vue'
 import SidebarNav from '@/components/layout/SidebarNav.vue'
-import MobileNav from '@/components/layout/MobileNav.vue'
 import HeaderLogo from '@/components/HeaderLogo.vue'
 import {
   Home,
@@ -189,16 +319,24 @@ import {
   SunMoon,
   ChevronRight,
   Megaphone,
+  Menu,
+  X,
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
-const { isDark, themeMode, toggleDarkMode } = useDarkMode()
+const { themeMode, toggleDarkMode } = useDarkMode()
 const isDemo = computed(() => isDemoMode())
 
 const showAuthError = ref(false)
+const mobileMenuOpen = ref(false)
 let authCheckInterval: number | null = null
+
+// 路由变化时自动关闭移动端菜单
+watch(() => route.path, () => {
+  mobileMenuOpen.value = false
+})
 
 onMounted(() => {
   authCheckInterval = setInterval(() => {
@@ -328,6 +466,12 @@ const sidebarClasses = computed(() => {
 
 const contentClasses = computed(() => {
     return `flex-1 min-w-0 bg-[#faf9f5] dark:bg-[#191714] text-[#3d3929] dark:text-[#d4a27f]`
+})
+
+const mainClasses = computed(() => {
+    // 移动端需要 pt-24 来避开固定头部（约69px）+ 额外间距
+    // 桌面端内容在 sticky header 下方，但需要一些内边距让内容不紧贴
+    return `pt-24 lg:pt-6`
 })
 
 </script>
