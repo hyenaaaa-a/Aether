@@ -570,46 +570,80 @@ class AdminFetchRemoteModelsAdapter(AdminApiAdapter):
             logger.error(f"Failed to decrypt API key: {e}")
             raise InvalidRequestException("Failed to decrypt API key")
 
-        # 构建请求 URL
+        # 构建请求 URL 列表（尝试多种端点格式）
         base_url = endpoint.base_url.rstrip("/")
-        models_url = f"{base_url}/v1/models"
+        
+        # 对于不同的 API 格式使用不同的认证方式
+        # OpenAI 格式: Authorization: Bearer <key>
+        # Gemini 格式: ?key=<key> 查询参数
+        endpoints_to_try = [
+            {"url": f"{base_url}/v1/models", "auth_type": "bearer"},
+            {"url": f"{base_url}/v1beta/models", "auth_type": "gemini"},
+        ]
 
-        # 发送 GET 请求
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(
-                    models_url,
-                    headers={
-                        "Authorization": f"Bearer {decrypted_key}",
-                        "Content-Type": "application/json",
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error fetching models: {e.response.status_code} - {e.response.text}")
-            raise InvalidRequestException(f"Failed to fetch models: HTTP {e.response.status_code}")
-        except httpx.RequestError as e:
-            logger.error(f"Request error fetching models: {e}")
-            raise InvalidRequestException(f"Failed to fetch models: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error fetching models: {e}")
-            raise InvalidRequestException(f"Failed to fetch models: {str(e)}")
+        all_models_dict: Dict[str, RemoteModelItem] = {}
+        errors_list = []
 
-        # 解析响应
-        models_data = data.get("data", [])
-        models = []
-        for m in models_data:
-            models.append(
-                RemoteModelItem(
-                    id=m.get("id", ""),
-                    object=m.get("object", "model"),
-                    created=m.get("created"),
-                    owned_by=m.get("owned_by"),
-                )
-            )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for endpoint_config in endpoints_to_try:
+                models_url = endpoint_config["url"]
+                auth_type = endpoint_config["auth_type"]
+                
+                try:
+                    # 根据认证类型构建请求
+                    if auth_type == "gemini":
+                        # Gemini API 使用查询参数认证
+                        request_url = f"{models_url}?key={decrypted_key}"
+                        headers = {"Content-Type": "application/json"}
+                    else:
+                        # OpenAI 格式使用 Bearer token
+                        request_url = models_url
+                        headers = {
+                            "Authorization": f"Bearer {decrypted_key}",
+                            "Content-Type": "application/json",
+                        }
+                    
+                    response = await client.get(request_url, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
 
-        logger.info(f"Fetched {len(models)} models from {models_url} for provider {provider.name}")
+                    # 解析响应 - 支持 OpenAI 格式 (data 数组) 和 Gemini 格式 (models 数组)
+                    models_data = data.get("data", []) or data.get("models", [])
+
+                    for m in models_data:
+                        # Gemini 格式使用 "name" 字段（如 "models/gemini-pro"），OpenAI 使用 "id"
+                        model_id = m.get("id") or m.get("name", "")
+                        # 去除 "models/" 前缀（Gemini 格式）
+                        if model_id.startswith("models/"):
+                            model_id = model_id[7:]
+
+                        if model_id and model_id not in all_models_dict:
+                            all_models_dict[model_id] = RemoteModelItem(
+                                id=model_id,
+                                object=m.get("object", "model"),
+                                created=m.get("created"),
+                                owned_by=m.get("owned_by") or m.get("owner"),
+                            )
+
+                    logger.info(f"Fetched {len(models_data)} models from {models_url}")
+
+                except httpx.HTTPStatusError as e:
+                    logger.warning(f"HTTP error fetching models from {models_url}: {e.response.status_code}")
+                    errors_list.append(f"{models_url}: HTTP {e.response.status_code}")
+                except httpx.RequestError as e:
+                    logger.warning(f"Request error fetching models from {models_url}: {e}")
+                    errors_list.append(f"{models_url}: {str(e)}")
+                except Exception as e:
+                    logger.warning(f"Error fetching models from {models_url}: {e}")
+                    errors_list.append(f"{models_url}: {str(e)}")
+
+        # 如果没有获取到任何模型，抛出错误
+        if not all_models_dict:
+            error_details = "; ".join(errors_list) if errors_list else "No models found"
+            raise InvalidRequestException(f"Failed to fetch models from any endpoint: {error_details}")
+
+        models = list(all_models_dict.values())
+        logger.info(f"Fetched {len(models)} unique models for provider {provider.name}")
 
         return FetchRemoteModelsResponse(
             models=models,
