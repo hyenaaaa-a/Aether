@@ -47,6 +47,17 @@
           <span class="font-mono">{{ endpointBaseUrl }}</span>
         </div>
 
+        <!-- 搜索框 -->
+        <div class="relative">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索模型 ID..."
+            class="w-full h-9 pl-9 pr-3 rounded-md border border-input bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+        </div>
+
         <!-- 全选操作 -->
         <div class="flex items-center justify-between">
           <label class="flex items-center gap-2 cursor-pointer">
@@ -56,7 +67,7 @@
               class="rounded"
               @change="handleSelectAll"
             >
-            <span class="text-sm">全选 ({{ remoteModels.length }} 个模型)</span>
+            <span class="text-sm">全选筛选结果 ({{ filteredModels.length }} / {{ remoteModels.length }} 个)</span>
           </label>
           <span class="text-sm text-muted-foreground">
             已选择 {{ selectedModels.size }} 个
@@ -76,7 +87,7 @@
             </thead>
             <tbody class="divide-y divide-border/40">
               <tr
-                v-for="model in remoteModels"
+                v-for="model in filteredModels"
                 :key="model.id"
                 class="hover:bg-muted/30 transition-colors"
                 :class="{
@@ -150,7 +161,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { CloudDownload, Loader2, AlertCircle, Box } from 'lucide-vue-next'
+import { CloudDownload, Loader2, AlertCircle, Box, Search } from 'lucide-vue-next'
 import { Dialog, Button, Badge } from '@/components/ui'
 import { useToast } from '@/composables/useToast'
 import {
@@ -187,11 +198,22 @@ const remoteModels = ref<RemoteModelItem[]>([])
 const endpointBaseUrl = ref('')
 const selectedModels = ref<Set<string>>(new Set())
 const existingModels = ref<Set<string>>(new Set())
+const searchQuery = ref('')
 
-// 全选状态
+// 筛选后的模型列表
+const filteredModels = computed(() => {
+  const query = searchQuery.value.toLowerCase().trim()
+  if (!query) return remoteModels.value
+  return remoteModels.value.filter(m => 
+    m.id.toLowerCase().includes(query) ||
+    (m.owned_by && m.owned_by.toLowerCase().includes(query))
+  )
+})
+
+// 全选状态（基于筛选后的列表）
 const selectAll = computed({
   get: () => {
-    const selectable = remoteModels.value.filter(m => !existingModels.value.has(m.id))
+    const selectable = filteredModels.value.filter(m => !existingModels.value.has(m.id))
     return selectable.length > 0 && selectable.every(m => selectedModels.value.has(m.id))
   },
   set: () => {}
@@ -214,6 +236,7 @@ function resetState() {
   endpointBaseUrl.value = ''
   selectedModels.value = new Set()
   existingModels.value = new Set()
+  searchQuery.value = ''
 }
 
 // 计算预计别名
@@ -260,16 +283,19 @@ function toggleModel(modelId: string) {
   selectedModels.value = newSet
 }
 
-// 全选/取消全选
+// 全选/取消全选（基于筛选后的列表）
 function handleSelectAll() {
-  const selectable = remoteModels.value.filter(m => !existingModels.value.has(m.id))
+  const selectable = filteredModels.value.filter(m => !existingModels.value.has(m.id))
   
   if (selectAll.value) {
     // 已全选，取消全选
-    selectedModels.value = new Set()
+    selectable.forEach(m => selectedModels.value.delete(m.id))
+    selectedModels.value = new Set(selectedModels.value)
   } else {
     // 未全选，全选
-    selectedModels.value = new Set(selectable.map(m => m.id))
+    const newSet = new Set(selectedModels.value)
+    selectable.forEach(m => newSet.add(m.id))
+    selectedModels.value = newSet
   }
 }
 
