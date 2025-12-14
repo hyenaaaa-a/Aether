@@ -70,6 +70,7 @@
               <tr>
                 <th class="w-12 px-3 py-2"></th>
                 <th class="text-left px-3 py-2 font-medium">模型 ID</th>
+                <th class="text-left px-3 py-2 font-medium">预计别名</th>
                 <th class="text-left px-3 py-2 font-medium">所有者</th>
               </tr>
             </thead>
@@ -101,6 +102,9 @@
                   >
                     已存在
                   </Badge>
+                </td>
+                <td class="px-3 py-2 font-mono text-xs text-muted-foreground">
+                  {{ getExpectedAlias(model.id) }}
                 </td>
                 <td class="px-3 py-2 text-muted-foreground">
                   {{ model.owned_by || '-' }}
@@ -160,10 +164,12 @@ interface Props {
   open: boolean
   providerId: string
   providerName?: string
+  providerIdentifier?: string  // provider.name 用于构建别名
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  providerName: ''
+  providerName: '',
+  providerIdentifier: ''
 })
 
 const emit = defineEmits<{
@@ -208,6 +214,11 @@ function resetState() {
   endpointBaseUrl.value = ''
   selectedModels.value = new Set()
   existingModels.value = new Set()
+}
+
+// 计算预计别名
+function getExpectedAlias(modelId: string): string {
+  return props.providerIdentifier ? `${props.providerIdentifier}/${modelId}` : modelId
 }
 
 // 获取远程模型

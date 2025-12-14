@@ -644,6 +644,7 @@
     :open="fetchModelsDialogOpen"
     :provider-id="provider.id"
     :provider-name="provider.display_name"
+    :provider-identifier="provider.name"
     @update:open="fetchModelsDialogOpen = $event"
     @imported="handleFetchModelsImported"
   />
