@@ -74,12 +74,12 @@
           :key="monitor.api_format"
           class="border border-border/60 rounded-lg p-4 hover:border-primary/50 transition-colors"
         >
-          <!-- 左右结构布局 -->
-          <div class="flex gap-6 items-center">
-            <!-- 左侧：信息区域 -->
-            <div class="w-44 flex-shrink-0 space-y-1.5">
+          <!-- 响应式布局：窄屏上下两行，宽屏左右结构 -->
+          <div class="flex flex-col sm:flex-row sm:gap-6 sm:items-center">
+            <!-- 第一行/左侧：信息区域 -->
+            <div class="sm:w-44 flex-shrink-0 space-y-1.5 mb-3 sm:mb-0">
               <!-- API 格式标签和成功率 -->
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
                 <Badge
                   variant="outline"
                   class="font-mono text-xs"
@@ -93,20 +93,27 @@
                 >
                   {{ (monitor.success_rate * 100).toFixed(0) }}%
                 </Badge>
+                <!-- 提供商信息（仅管理员可见）- 窄屏时显示在同一行 -->
+                <span
+                  v-if="showProviderInfo && 'provider_count' in monitor"
+                  class="text-xs text-muted-foreground sm:hidden"
+                >
+                  {{ monitor.provider_count }} 个提供商 / {{ monitor.key_count }} 个密钥
+                </span>
               </div>
 
-              <!-- 提供商信息（仅管理员可见） -->
+              <!-- 提供商信息（仅管理员可见）- 宽屏时显示在下方 -->
               <div
                 v-if="showProviderInfo && 'provider_count' in monitor"
-                class="text-xs text-muted-foreground"
+                class="text-xs text-muted-foreground hidden sm:block"
               >
                 {{ monitor.provider_count }} 个提供商 / {{ monitor.key_count }} 个密钥
               </div>
             </div>
 
-            <!-- 右侧：时间线区域 -->
-            <div class="flex-1 min-w-0 flex justify-end">
-              <div class="w-full max-w-5xl">
+            <!-- 第二行/右侧：时间线区域 -->
+            <div class="flex-1 min-w-0 sm:flex sm:justify-end">
+              <div class="w-full sm:max-w-5xl">
                 <EndpointHealthTimeline
                   :monitor="monitor"
                   :lookback-hours="parseInt(lookbackHours)"

@@ -11,5 +11,4 @@ export { default as CardSection } from './CardSection.vue'
 
 // 应用外壳组件
 export { default as AppShell } from './AppShell.vue'
-export { default as MobileNav } from './MobileNav.vue'
 export { default as SidebarNav } from './SidebarNav.vue'

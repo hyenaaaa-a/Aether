@@ -14,7 +14,7 @@
         />
 
         <!-- 抽屉内容 -->
-        <Card class="relative h-full w-[700px] rounded-none shadow-2xl overflow-y-auto">
+        <Card class="relative h-full w-full sm:w-[700px] sm:max-w-[90vw] rounded-none shadow-2xl overflow-y-auto">
           <!-- 加载状态 -->
           <div
             v-if="loading"
@@ -25,11 +25,11 @@
 
           <template v-else-if="provider">
             <!-- 头部:名称 + 快捷操作 -->
-            <div class="sticky top-0 z-10 bg-background border-b p-6">
-              <div class="flex items-start justify-between gap-4">
+            <div class="sticky top-0 z-10 bg-background border-b p-4 sm:p-6">
+              <div class="flex items-start justify-between gap-3 sm:gap-4">
                 <div class="space-y-1 flex-1 min-w-0">
                   <div class="flex items-center gap-2">
-                    <h2 class="text-xl font-bold truncate">
+                    <h2 class="text-lg sm:text-xl font-bold truncate">
                       {{ provider.display_name }}
                     </h2>
                     <Badge
@@ -68,7 +68,7 @@
                     variant="ghost"
                     size="icon"
                     :title="provider.is_active ? '点击停用' : '点击启用'"
-                    @click="$emit('toggle-status', provider)"
+                    @click="$emit('toggleStatus', provider)"
                   >
                     <Power class="w-4 h-4" />
                   </Button>
@@ -84,7 +84,7 @@
               </div>
             </div>
 
-            <div class="space-y-6 p-6">
+            <div class="space-y-6 p-4 sm:p-6">
               <!-- 配额使用情况 -->
               <Card
                 v-if="provider.billing_type === 'monthly_quota' && provider.monthly_quota_usd"
@@ -699,7 +699,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
   (e: 'edit', provider: any): void
-  (e: 'toggle-status', provider: any): void
+  (e: 'toggleStatus', provider: any): void
   (e: 'refresh'): void
 }>()
 
@@ -1107,9 +1107,6 @@ async function handleDrop(event: DragEvent, targetKey: EndpointAPIKey, endpoint:
     return
   }
 
-  const draggedKey = keys[draggedIndex]
-  const draggedKeyOriginalPriority = draggedKey.internal_priority ?? draggedIndex
-
   // 记录原始优先级分组（排除被拖动的密钥）
   // key: 原始优先级值, value: 密钥ID数组
   const originalGroups = new Map<number, string[]>()
@@ -1251,7 +1248,7 @@ async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text)
     showSuccess('已复制到剪贴板')
-  } catch (err) {
+  } catch {
     showError('复制失败', '错误')
   }
 }
@@ -1287,7 +1284,7 @@ async function loadEndpoints() {
         try {
           const keys = await getEndpointKeys(endpoint.id)
           return { ...endpoint, keys }
-        } catch (err) {
+        } catch {
           // 如果获取密钥失败，返回空数组
           return { ...endpoint, keys: [] }
         }

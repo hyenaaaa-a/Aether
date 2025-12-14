@@ -14,7 +14,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  variant: 'default'
+  variant: 'default',
+  class: undefined,
 })
 
 // 标准卡片变体定义

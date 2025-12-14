@@ -10,6 +10,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  class: undefined,
   orientation: 'horizontal',
   decorative: true,
 })

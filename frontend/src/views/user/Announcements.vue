@@ -6,17 +6,17 @@
       class="overflow-hidden"
     >
       <!-- 标题和操作栏 -->
-      <div class="px-6 py-3.5 border-b border-border/60">
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-base font-semibold">
+      <div class="px-4 sm:px-6 py-3 sm:py-3.5 border-b border-border/60">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+          <div class="shrink-0">
+            <h3 class="text-sm sm:text-base font-semibold">
               公告管理
             </h3>
             <p class="text-xs text-muted-foreground mt-0.5">
               {{ isAdmin ? '管理系统公告和通知' : '查看系统公告和通知' }}
             </p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <Badge
               v-if="unreadCount > 0"
               variant="default"
@@ -24,7 +24,7 @@
             >
               {{ unreadCount }} 条未读
             </Badge>
-            <div class="h-4 w-px bg-border" />
+            <div class="hidden sm:block h-4 w-px bg-border" />
             <Button
               v-if="isAdmin"
               variant="ghost"
@@ -68,7 +68,7 @@
         v-else
         class="overflow-x-auto"
       >
-        <Table>
+        <Table class="hidden xl:table">
           <TableHeader>
             <TableRow class="border-b border-border/60 hover:bg-transparent">
               <TableHead class="w-[80px] h-12 font-semibold text-center">
@@ -217,6 +217,91 @@
             </TableRow>
           </TableBody>
         </Table>
+
+        <!-- 移动端卡片列表 -->
+        <div
+          v-if="announcements.length > 0"
+          class="xl:hidden divide-y divide-border/40"
+        >
+          <div
+            v-for="announcement in announcements"
+            :key="announcement.id"
+            :class="[
+              'p-4 space-y-2 cursor-pointer transition-colors',
+              announcement.is_read ? 'hover:bg-muted/30' : 'bg-primary/5 hover:bg-primary/10'
+            ]"
+            @click="viewAnnouncementDetail(announcement)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <component
+                  :is="getAnnouncementIcon(announcement.type)"
+                  class="w-4 h-4 shrink-0"
+                  :class="getIconColor(announcement.type)"
+                />
+                <span class="font-medium text-sm">{{ announcement.title }}</span>
+                <Pin
+                  v-if="announcement.is_pinned"
+                  class="w-3.5 h-3.5 text-muted-foreground shrink-0"
+                />
+              </div>
+              <Badge
+                :variant="announcement.is_read ? 'secondary' : 'default'"
+                class="text-xs shrink-0"
+              >
+                {{ announcement.is_read ? '已读' : '未读' }}
+              </Badge>
+            </div>
+            <p class="text-xs text-muted-foreground line-clamp-2">
+              {{ getPlainText(announcement.content) }}
+            </p>
+            <div class="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>{{ announcement.author.username }}</span>
+              <span>·</span>
+              <span>{{ formatDate(announcement.created_at) }}</span>
+            </div>
+            <div
+              v-if="isAdmin"
+              class="flex items-center gap-4 pt-2"
+              @click.stop
+            >
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-muted-foreground">置顶</span>
+                <Switch
+                  :model-value="announcement.is_pinned"
+                  class="data-[state=checked]:bg-emerald-500 scale-75"
+                  @update:model-value="toggleAnnouncementPin(announcement, $event)"
+                />
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-muted-foreground">启用</span>
+                <Switch
+                  :model-value="announcement.is_active"
+                  class="data-[state=checked]:bg-primary scale-75"
+                  @update:model-value="toggleAnnouncementActive(announcement, $event)"
+                />
+              </div>
+              <div class="flex items-center gap-1 ml-auto">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7"
+                  @click="openEditDialog(announcement)"
+                >
+                  <SquarePen class="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7 hover:text-destructive"
+                  @click="confirmDelete(announcement)"
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 分页 -->
@@ -492,6 +577,7 @@ import SelectItem from '@/components/ui/select-item.vue'
 import { AlertDialog } from '@/components/common'
 import { Bell, AlertCircle, AlertTriangle, Info, Pin, Wrench, Loader2, Plus, SquarePen, Trash2 } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
+import { log } from '@/utils/logger'
 import { marked } from 'marked'
 import { sanitizeMarkdown } from '@/utils/sanitize'
 
@@ -544,22 +630,10 @@ async function loadAnnouncements(page = 1) {
     total.value = response.total
     unreadCount.value = response.unread_count || 0
   } catch (error) {
-    console.error('加载公告失败:', error)
+    log.error('加载公告失败:', error)
     showError('加载公告失败')
   } finally {
     loading.value = false
-  }
-}
-
-async function markAsRead(announcement: Announcement) {
-  try {
-    await announcementApi.markAsRead(announcement.id)
-    announcement.is_read = true
-    unreadCount.value = Math.max(0, unreadCount.value - 1)
-    success('已标记为已读')
-  } catch (error) {
-    console.error('标记失败:', error)
-    showError('标记失败')
   }
 }
 
@@ -571,7 +645,7 @@ async function viewAnnouncementDetail(announcement: Announcement) {
       announcement.is_read = true
       unreadCount.value = Math.max(0, unreadCount.value - 1)
     } catch (error) {
-      console.error('标记已读失败:', error)
+      log.error('标记已读失败:', error)
     }
   }
 
@@ -614,7 +688,7 @@ async function toggleAnnouncementPin(announcement: Announcement, newStatus: bool
     announcement.is_pinned = newStatus
     success(newStatus ? '已置顶' : '已取消置顶')
   } catch (error) {
-    console.error('更新置顶状态失败:', error)
+    log.error('更新置顶状态失败:', error)
     showError('更新置顶状态失败')
   }
 }
@@ -627,7 +701,7 @@ async function toggleAnnouncementActive(announcement: Announcement, newStatus: b
     announcement.is_active = newStatus
     success(newStatus ? '已启用' : '已禁用')
   } catch (error) {
-    console.error('更新启用状态失败:', error)
+    log.error('更新启用状态失败:', error)
     showError('更新启用状态失败')
   }
 }
@@ -652,7 +726,7 @@ async function saveAnnouncement() {
     dialogOpen.value = false
     loadAnnouncements(currentPage.value)
   } catch (error) {
-    console.error('保存失败:', error)
+    log.error('保存失败:', error)
     showError('保存失败')
   } finally {
     saving.value = false
@@ -674,7 +748,7 @@ async function deleteAnnouncement() {
     deleteDialogOpen.value = false
     loadAnnouncements(currentPage.value)
   } catch (error) {
-    console.error('删除失败:', error)
+    log.error('删除失败:', error)
     showError('删除失败')
   } finally {
     deleting.value = false
@@ -707,19 +781,6 @@ function getIconColor(type: string) {
   }
 }
 
-function getIconBgClass(type: string) {
-  switch (type) {
-    case 'important':
-      return 'bg-red-50 dark:bg-red-900/20'
-    case 'warning':
-      return 'bg-yellow-50 dark:bg-yellow-900/20'
-    case 'maintenance':
-      return 'bg-orange-50 dark:bg-orange-900/20'
-    default:
-      return 'bg-primary/10'
-  }
-}
-
 function getTypeTextColor(type: string): string {
   switch (type) {
     case 'important':
@@ -730,19 +791,6 @@ function getTypeTextColor(type: string): string {
       return 'text-orange-600 dark:text-orange-400'
     default:
       return 'text-primary'
-  }
-}
-
-function getTypeBadgeVariant(type: string): 'default' | 'success' | 'destructive' | 'warning' | 'secondary' {
-  switch (type) {
-    case 'important':
-      return 'destructive'
-    case 'warning':
-      return 'warning'
-    case 'maintenance':
-      return 'secondary'
-    default:
-      return 'default'
   }
 }
 
@@ -791,7 +839,7 @@ function renderMarkdown(content: string): string {
 function getPlainText(content: string): string {
   // 简单地移除 Markdown 标记，用于预览
   return content
-    .replace(/[#*_`~\[\]()]/g, '')
+    .replace(/[#*_`~[\]()]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
     .substring(0, 200)

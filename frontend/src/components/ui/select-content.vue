@@ -35,8 +35,12 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  class: undefined,
   position: 'popper',
+  side: undefined,
   sideOffset: 4,
+  align: undefined,
+  alignOffset: undefined,
 })
 
 const contentClass = computed(() =>

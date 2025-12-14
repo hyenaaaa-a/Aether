@@ -7,7 +7,7 @@
         :model-value="selectedPeriod"
         @update:model-value="$emit('update:selectedPeriod', $event)"
       >
-        <SelectTrigger class="w-32 h-8 text-xs border-border/60">
+        <SelectTrigger class="w-24 sm:w-32 h-8 text-xs border-border/60">
           <SelectValue placeholder="选择时间段" />
         </SelectTrigger>
         <SelectContent>
@@ -30,7 +30,7 @@
       </Select>
 
       <!-- 分隔线 -->
-      <div class="h-4 w-px bg-border" />
+      <div class="hidden sm:block h-4 w-px bg-border" />
 
       <!-- 用户筛选（仅管理员可见） -->
       <Select
@@ -39,7 +39,7 @@
         :model-value="filterUser"
         @update:model-value="$emit('update:filterUser', $event)"
       >
-        <SelectTrigger class="w-36 h-8 text-xs border-border/60">
+        <SelectTrigger class="w-24 sm:w-36 h-8 text-xs border-border/60">
           <SelectValue placeholder="全部用户" />
         </SelectTrigger>
         <SelectContent>
@@ -62,7 +62,7 @@
         :model-value="filterModel"
         @update:model-value="$emit('update:filterModel', $event)"
       >
-        <SelectTrigger class="w-40 h-8 text-xs border-border/60">
+        <SelectTrigger class="w-24 sm:w-40 h-8 text-xs border-border/60">
           <SelectValue placeholder="全部模型" />
         </SelectTrigger>
         <SelectContent>
@@ -85,7 +85,7 @@
         :model-value="filterProvider"
         @update:model-value="$emit('update:filterProvider', $event)"
       >
-        <SelectTrigger class="w-32 h-8 text-xs border-border/60">
+        <SelectTrigger class="w-24 sm:w-32 h-8 text-xs border-border/60">
           <SelectValue placeholder="全部提供商" />
         </SelectTrigger>
         <SelectContent>
@@ -108,7 +108,7 @@
         :model-value="filterStatus"
         @update:model-value="$emit('update:filterStatus', $event)"
       >
-        <SelectTrigger class="w-28 h-8 text-xs border-border/60">
+        <SelectTrigger class="w-20 sm:w-28 h-8 text-xs border-border/60">
           <SelectValue placeholder="全部状态" />
         </SelectTrigger>
         <SelectContent>
@@ -134,7 +134,7 @@
       </Select>
 
       <!-- 分隔线 -->
-      <div class="h-4 w-px bg-border" />
+      <div class="hidden sm:block h-4 w-px bg-border" />
 
       <!-- 刷新按钮 -->
       <RefreshButton

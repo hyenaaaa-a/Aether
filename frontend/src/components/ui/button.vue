@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
   variant: 'default',
   size: 'default',
   disabled: false,
+  class: undefined,
   type: 'button'
 })
 

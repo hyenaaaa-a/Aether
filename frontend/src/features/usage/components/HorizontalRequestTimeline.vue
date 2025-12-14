@@ -310,6 +310,7 @@ import Skeleton from '@/components/ui/skeleton.vue'
 import Separator from '@/components/ui/separator.vue'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-vue-next'
 import { requestTraceApi, type RequestTrace, type CandidateRecord } from '@/api/requestTrace'
+import { log } from '@/utils/logger'
 
 // 节点组类型
 interface NodeGroup {
@@ -552,11 +553,6 @@ const isCapabilityUsed = (cap: string): boolean => {
   return activeCapabilities.value.includes(cap)
 }
 
-// 检查某个能力是否被 Key 支持
-const isCapabilitySupported = (cap: string): boolean => {
-  return keyCapabilities.value.includes(cap)
-}
-
 // 格式化能力标签显示
 const formatCapabilityLabel = (cap: string): string => {
   const labels: Record<string, string> = {
@@ -624,7 +620,7 @@ const loadTrace = async () => {
     trace.value = await requestTraceApi.getRequestTrace(props.requestId)
   } catch (err: any) {
     error.value = err.response?.data?.detail || err.message || '加载失败'
-    console.error('加载请求追踪失败:', err)
+    log.error('加载请求追踪失败:', err)
   } finally {
     loading.value = false
   }
@@ -653,7 +649,20 @@ watch(groupedTimeline, (newGroups) => {
     return
   }
 
-  // 默认选择最后一个组
+  // 查找最后一个有效结果的组（failed 优先于 skipped/available）
+  // 从后往前找第一个 failed 的组
+  for (let i = newGroups.length - 1; i >= 0; i--) {
+    const group = newGroups[i]
+    if (group.primaryStatus === 'failed') {
+      selectedGroupIndex.value = i
+      // 选中最后一个失败的尝试
+      const failedIdx = group.allAttempts.findLastIndex((a: CandidateRecord) => a.status === 'failed')
+      selectedAttemptIndex.value = failedIdx >= 0 ? failedIdx : group.allAttempts.length - 1
+      return
+    }
+  }
+
+  // 都没有则选择最后一个组
   selectedGroupIndex.value = newGroups.length - 1
   selectedAttemptIndex.value = newGroups[newGroups.length - 1].allAttempts.length - 1
 }, { immediate: true })
@@ -700,19 +709,6 @@ const getStatusLabel = (status: string) => {
     skipped: '跳过'
   }
   return labels[status] || status
-}
-
-// 获取状态徽章样式
-const getStatusBadgeVariant = (status: string): any => {
-  const variants: Record<string, string> = {
-    available: 'outline',
-    pending: 'secondary',
-    streaming: 'secondary',
-    success: 'success',
-    failed: 'destructive',
-    skipped: 'outline'
-  }
-  return variants[status] || 'default'
 }
 
 // 获取状态颜色类

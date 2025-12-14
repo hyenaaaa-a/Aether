@@ -1,5 +1,5 @@
 <template>
-  <Card class="p-4 !overflow-visible">
+  <Card class="p-4 overflow-hidden">
     <div class="flex items-center justify-between mb-3">
       <p class="text-sm font-semibold">
         {{ title }}

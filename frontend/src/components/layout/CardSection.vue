@@ -52,6 +52,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  title: undefined,
+  description: undefined,
   variant: 'default',
   padding: 'md',
 })

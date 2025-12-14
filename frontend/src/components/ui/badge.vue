@@ -5,6 +5,7 @@ import { computed } from 'vue'
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'default',
+  class: undefined,
 })
 
 const badgeVariants = cva(
