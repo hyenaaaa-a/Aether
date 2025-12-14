@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
 
 # Python 依赖（安装到系统，不用 -e 模式）
 COPY pyproject.toml README.md ./
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AETHER=4.0.0
 RUN mkdir -p src && touch src/__init__.py && \
     pip install --no-cache-dir .
 
