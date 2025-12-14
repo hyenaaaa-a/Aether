@@ -152,7 +152,7 @@ class EndpointAPIKeyCreate(BaseModel):
     """为 Endpoint 添加 API Key"""
 
     endpoint_id: str = Field(..., description="Endpoint ID")
-    api_key: str = Field(..., min_length=10, max_length=500, description="API Key（将自动加密）")
+    api_key: str = Field(..., min_length=1, max_length=500, description="API Key（将自动加密）")
     name: str = Field(..., min_length=1, max_length=100, description="密钥名称（必填，用于识别）")
 
     # 成本计算
@@ -196,10 +196,6 @@ class EndpointAPIKeyCreate(BaseModel):
         # 移除首尾空白
         v = v.strip()
 
-        # 检查最小长度
-        if len(v) < 10:
-            raise ValueError("API Key 长度不能少于 10 个字符")
-
         # 检查危险字符（SQL 注入防护）
         dangerous_chars = ["'", '"', ";", "--", "/*", "*/", "<", ">"]
         for char in dangerous_chars:
@@ -237,7 +233,7 @@ class EndpointAPIKeyUpdate(BaseModel):
     """更新 Endpoint API Key"""
 
     api_key: Optional[str] = Field(
-        default=None, min_length=10, max_length=500, description="API Key（将自动加密）"
+        default=None, min_length=1, max_length=500, description="API Key（将自动加密）"
     )
     name: Optional[str] = Field(default=None, min_length=1, max_length=100, description="密钥名称")
     rate_multiplier: Optional[float] = Field(default=None, ge=0.01, description="成本倍率")
@@ -273,8 +269,6 @@ class EndpointAPIKeyUpdate(BaseModel):
             return v
 
         v = v.strip()
-        if len(v) < 10:
-            raise ValueError("API Key 长度不能少于 10 个字符")
 
         dangerous_chars = ["'", '"', ";", "--", "/*", "*/", "<", ">"]
         for char in dangerous_chars:

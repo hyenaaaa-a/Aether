@@ -347,11 +347,6 @@ const apiKeyError = computed(() => {
     return ''
   }
 
-  // 如果输入了值，检查长度
-  if (apiKey.length < 10) {
-    return 'API 密钥至少需要 10 个字符'
-  }
-
   return ''
 })
 

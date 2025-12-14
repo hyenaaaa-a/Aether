@@ -526,6 +526,7 @@
                 @edit-model="handleEditModel"
                 @delete-model="handleDeleteModel"
                 @batch-assign="handleBatchAssign"
+                @fetch-models="handleFetchModels"
               />
 
               <!-- 模型映射 -->
@@ -636,6 +637,16 @@
     @update:open="batchAssignDialogOpen = $event"
     @changed="handleBatchAssignChanged"
   />
+
+  <!-- 拉取远程模型对话框 -->
+  <FetchRemoteModelsDialog
+    v-if="open && provider"
+    :open="fetchModelsDialogOpen"
+    :provider-id="provider.id"
+    :provider-name="provider.display_name"
+    @update:open="fetchModelsDialogOpen = $event"
+    @imported="handleFetchModelsImported"
+  />
 </template>
 
 <script setup lang="ts">
@@ -669,6 +680,7 @@ import {
 } from '@/features/providers/components'
 import EndpointFormDialog from '@/features/providers/components/EndpointFormDialog.vue'
 import ProviderModelFormDialog from '@/features/providers/components/ProviderModelFormDialog.vue'
+import FetchRemoteModelsDialog from '@/features/providers/components/FetchRemoteModelsDialog.vue'
 import AlertDialog from '@/components/common/AlertDialog.vue'
 import {
   deleteEndpoint as deleteEndpointAPI,
@@ -733,6 +745,7 @@ const editingModel = ref<Model | null>(null)
 const deleteModelConfirmOpen = ref(false)
 const modelToDelete = ref<Model | null>(null)
 const batchAssignDialogOpen = ref(false)
+const fetchModelsDialogOpen = ref(false)
 
 // 拖动排序相关状态
 const dragState = ref({
@@ -1017,6 +1030,17 @@ function handleBatchAssign() {
 
 // 处理批量关联完成
 async function handleBatchAssignChanged() {
+  await loadProvider()
+  emit('refresh')
+}
+
+// 处理打开拉取远程模型对话框
+function handleFetchModels() {
+  fetchModelsDialogOpen.value = true
+}
+
+// 处理远程模型导入完成
+async function handleFetchModelsImported() {
   await loadProvider()
   emit('refresh')
 }

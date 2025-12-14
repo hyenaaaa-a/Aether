@@ -143,3 +143,67 @@ export async function batchAssignModelsToProvider(
   )
   return response.data
 }
+
+/**
+ * 远程模型条目
+ */
+export interface RemoteModelItem {
+  id: string
+  object?: string
+  created?: number
+  owned_by?: string
+}
+
+/**
+ * 获取远程模型响应
+ */
+export interface FetchRemoteModelsResponse {
+  models: RemoteModelItem[]
+  total: number
+  endpoint_id: string
+  endpoint_base_url: string
+}
+
+/**
+ * 导入远程模型响应
+ */
+export interface ImportRemoteModelsResponse {
+  success: Array<{
+    model_id: string
+    global_model_id: string
+    global_model_name: string
+    provider_model_id: string
+    created_global_model: boolean
+  }>
+  errors: Array<{
+    model_id: string
+    error: string
+  }>
+}
+
+/**
+ * 从 Provider 远程 API 获取模型列表
+ */
+export async function fetchRemoteModels(
+  providerId: string
+): Promise<FetchRemoteModelsResponse> {
+  const response = await client.get(
+    `/api/admin/providers/${providerId}/fetch-remote-models`
+  )
+  return response.data
+}
+
+/**
+ * 导入远程模型（自动创建 GlobalModel 和 Provider Model）
+ */
+export async function importRemoteModels(
+  providerId: string,
+  modelIds: string[]
+): Promise<ImportRemoteModelsResponse> {
+  const response = await client.post(
+    `/api/admin/providers/${providerId}/import-remote-models`,
+    { model_ids: modelIds }
+  )
+  return response.data
+}
+

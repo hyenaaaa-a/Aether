@@ -5,6 +5,7 @@ Provider 模型管理 API
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
@@ -22,18 +23,25 @@ from src.models.api import (
 from src.models.pydantic_models import (
     BatchAssignModelsToProviderRequest,
     BatchAssignModelsToProviderResponse,
+    FetchRemoteModelsResponse,
+    ImportRemoteModelsRequest,
+    ImportRemoteModelsResponse,
+    RemoteModelItem,
 )
 from src.models.database import (
     GlobalModel,
     Model,
     ModelMapping,
     Provider,
+    ProviderAPIKey,
+    ProviderEndpoint,
 )
 from src.models.pydantic_models import (
     ProviderAvailableSourceModel,
     ProviderAvailableSourceModelsResponse,
 )
 from src.services.model.service import ModelService
+from src.core.crypto import crypto_service
 
 router = APIRouter(tags=["Model Management"])
 pipeline = ApiRequestPipeline()
@@ -160,6 +168,45 @@ async def batch_assign_global_models_to_provider(
     return await pipeline.run(adapter=adapter, http_request=request, db=db, mode=adapter.mode)
 
 
+@router.get(
+    "/{provider_id}/fetch-remote-models",
+    response_model=FetchRemoteModelsResponse,
+)
+async def fetch_remote_models(
+    provider_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> FetchRemoteModelsResponse:
+    """
+    从 Provider 的远程 API 获取可用模型列表
+    
+    通过 Provider 的 Endpoint 发送 GET /v1/models 请求
+    """
+    adapter = AdminFetchRemoteModelsAdapter(provider_id=provider_id)
+    return await pipeline.run(adapter=adapter, http_request=request, db=db, mode=adapter.mode)
+
+
+@router.post(
+    "/{provider_id}/import-remote-models",
+    response_model=ImportRemoteModelsResponse,
+)
+async def import_remote_models(
+    provider_id: str,
+    payload: ImportRemoteModelsRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ImportRemoteModelsResponse:
+    """
+    导入远程模型（自动创建 GlobalModel 和 Provider Model）
+    
+    对于每个要导入的模型：
+    1. 如果 GlobalModel 不存在，创建一个价格为 0 的 GlobalModel
+    2. 创建 Provider 的 Model 记录关联到该 GlobalModel
+    """
+    adapter = AdminImportRemoteModelsAdapter(provider_id=provider_id, payload=payload)
+    return await pipeline.run(adapter=adapter, http_request=request, db=db, mode=adapter.mode)
+
+
 # -------- Adapters --------
 
 
@@ -196,6 +243,26 @@ class AdminCreateProviderModelAdapter(AdminApiAdapter):
         try:
             model = ModelService.create_model(db, self.provider_id, self.model_data)
             logger.info(f"Model created: {model.provider_model_name} for provider {provider.name} by {context.user.username}")
+            
+            # 自动创建模型别名：格式为 provider_name/global_model_name
+            if model.global_model:
+                alias_name = f"{provider.name}/{model.global_model.name}"
+                existing_alias = db.query(ModelMapping).filter(
+                    ModelMapping.source_model == alias_name,
+                    ModelMapping.provider_id == self.provider_id
+                ).first()
+                if not existing_alias:
+                    new_alias = ModelMapping(
+                        source_model=alias_name,
+                        target_global_model_id=model.global_model_id,
+                        provider_id=self.provider_id,
+                        mapping_type="alias",
+                        is_active=True
+                    )
+                    db.add(new_alias)
+                    db.commit()
+                    logger.info(f"Auto-created alias '{alias_name}' for model {model.provider_model_name}")
+            
             return ModelService.convert_to_response(model)
         except Exception as exc:
             raise InvalidRequestException(str(exc))
@@ -425,11 +492,28 @@ class AdminBatchAssignModelsToProviderAdapter(AdminApiAdapter):
                 db.add(new_model)
                 db.flush()
 
+                # 自动创建模型别名：格式为 provider_name/global_model_name
+                alias_name = f"{provider.name}/{global_model.name}"
+                existing_alias = db.query(ModelMapping).filter(
+                    ModelMapping.source_model == alias_name,
+                    ModelMapping.provider_id == self.provider_id
+                ).first()
+                if not existing_alias:
+                    new_alias = ModelMapping(
+                        source_model=alias_name,
+                        target_global_model_id=global_model_id,
+                        provider_id=self.provider_id,
+                        mapping_type="alias",
+                        is_active=True
+                    )
+                    db.add(new_alias)
+
                 success.append(
                     {
                         "global_model_id": global_model_id,
                         "global_model_name": global_model.name,
                         "model_id": new_model.id,
+                        "auto_alias": alias_name,
                     }
                 )
             except Exception as e:
@@ -441,3 +525,206 @@ class AdminBatchAssignModelsToProviderAdapter(AdminApiAdapter):
         )
 
         return BatchAssignModelsToProviderResponse(success=success, errors=errors)
+
+
+@dataclass
+class AdminFetchRemoteModelsAdapter(AdminApiAdapter):
+    """从远程 API 获取模型列表"""
+
+    provider_id: str
+
+    async def handle(self, context):  # type: ignore[override]
+        db = context.db
+        provider = db.query(Provider).filter(Provider.id == self.provider_id).first()
+        if not provider:
+            raise NotFoundException("Provider not found", "provider")
+
+        # 获取第一个活跃的 Endpoint
+        endpoint = (
+            db.query(ProviderEndpoint)
+            .filter(
+                ProviderEndpoint.provider_id == self.provider_id,
+                ProviderEndpoint.is_active == True,
+            )
+            .first()
+        )
+        if not endpoint:
+            raise InvalidRequestException("No active endpoint found for this provider")
+
+        # 获取该 Endpoint 的第一个活跃 API Key
+        api_key_record = (
+            db.query(ProviderAPIKey)
+            .filter(
+                ProviderAPIKey.endpoint_id == endpoint.id,
+                ProviderAPIKey.is_active == True,
+            )
+            .first()
+        )
+        if not api_key_record:
+            raise InvalidRequestException("No active API key found for this endpoint")
+
+        # 解密 API Key
+        try:
+            decrypted_key = crypto_service.decrypt(api_key_record.api_key)
+        except Exception as e:
+            logger.error(f"Failed to decrypt API key: {e}")
+            raise InvalidRequestException("Failed to decrypt API key")
+
+        # 构建请求 URL
+        base_url = endpoint.base_url.rstrip("/")
+        models_url = f"{base_url}/v1/models"
+
+        # 发送 GET 请求
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    models_url,
+                    headers={
+                        "Authorization": f"Bearer {decrypted_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching models: {e.response.status_code} - {e.response.text}")
+            raise InvalidRequestException(f"Failed to fetch models: HTTP {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error fetching models: {e}")
+            raise InvalidRequestException(f"Failed to fetch models: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error fetching models: {e}")
+            raise InvalidRequestException(f"Failed to fetch models: {str(e)}")
+
+        # 解析响应
+        models_data = data.get("data", [])
+        models = []
+        for m in models_data:
+            models.append(
+                RemoteModelItem(
+                    id=m.get("id", ""),
+                    object=m.get("object", "model"),
+                    created=m.get("created"),
+                    owned_by=m.get("owned_by"),
+                )
+            )
+
+        logger.info(f"Fetched {len(models)} models from {models_url} for provider {provider.name}")
+
+        return FetchRemoteModelsResponse(
+            models=models,
+            total=len(models),
+            endpoint_id=endpoint.id,
+            endpoint_base_url=endpoint.base_url,
+        )
+
+
+@dataclass
+class AdminImportRemoteModelsAdapter(AdminApiAdapter):
+    """导入远程模型（创建 GlobalModel 和 Provider Model）"""
+
+    provider_id: str
+    payload: ImportRemoteModelsRequest
+
+    async def handle(self, context):  # type: ignore[override]
+        db = context.db
+        provider = db.query(Provider).filter(Provider.id == self.provider_id).first()
+        if not provider:
+            raise NotFoundException("Provider not found", "provider")
+
+        success = []
+        errors = []
+
+        for model_id in self.payload.model_ids:
+            try:
+                # 检查是否已存在同名的 GlobalModel
+                existing_global = (
+                    db.query(GlobalModel)
+                    .filter(GlobalModel.name == model_id)
+                    .first()
+                )
+
+                if existing_global:
+                    global_model = existing_global
+                else:
+                    # 创建新的 GlobalModel（价格默认为 0）
+                    global_model = GlobalModel(
+                        name=model_id,
+                        display_name=model_id,
+                        description=f"Auto-imported from {provider.display_name}",
+                        default_tiered_pricing={
+                            "tiers": [
+                                {
+                                    "up_to": None,
+                                    "input_price_per_1m": 0.0,
+                                    "output_price_per_1m": 0.0,
+                                }
+                            ]
+                        },
+                        is_active=True,
+                    )
+                    db.add(global_model)
+                    db.flush()
+
+                # 检查该 Provider 是否已有该模型
+                existing_model = (
+                    db.query(Model)
+                    .filter(
+                        Model.provider_id == self.provider_id,
+                        Model.global_model_id == global_model.id,
+                    )
+                    .first()
+                )
+
+                if existing_model:
+                    errors.append({
+                        "model_id": model_id,
+                        "error": "Already exists in this provider",
+                    })
+                    continue
+
+                # 创建 Provider Model
+                new_model = Model(
+                    provider_id=self.provider_id,
+                    global_model_id=global_model.id,
+                    provider_model_name=model_id,
+                    is_active=True,
+                )
+                db.add(new_model)
+                db.flush()
+
+                # 自动创建模型别名：格式为 provider_name/model_id
+                alias_name = f"{provider.name}/{model_id}"
+                existing_alias = db.query(ModelMapping).filter(
+                    ModelMapping.source_model == alias_name,
+                    ModelMapping.provider_id == self.provider_id
+                ).first()
+                if not existing_alias:
+                    new_alias = ModelMapping(
+                        source_model=alias_name,
+                        target_global_model_id=global_model.id,
+                        provider_id=self.provider_id,
+                        mapping_type="alias",
+                        is_active=True
+                    )
+                    db.add(new_alias)
+
+                success.append({
+                    "model_id": model_id,
+                    "global_model_id": global_model.id,
+                    "global_model_name": global_model.name,
+                    "provider_model_id": new_model.id,
+                    "created_global_model": not bool(existing_global),
+                    "auto_alias": alias_name,
+                })
+            except Exception as e:
+                logger.error(f"Error importing model {model_id}: {e}")
+                errors.append({"model_id": model_id, "error": str(e)})
+
+        db.commit()
+        logger.info(
+            f"Imported {len(success)} models to provider {provider.name} by {context.user.username}"
+        )
+
+        return ImportRemoteModelsResponse(success=success, errors=errors)
+

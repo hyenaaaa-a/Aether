@@ -405,6 +405,39 @@ class DeleteModelMappingResponse(BaseModel):
     message: Optional[str] = None
 
 
+# ========== 远程模型拉取相关模型 ==========
+
+
+class RemoteModelItem(BaseModel):
+    """从远程 API 获取的模型条目"""
+
+    id: str = Field(..., description="模型 ID（来自远程 API）")
+    object: Optional[str] = Field(default="model", description="对象类型")
+    created: Optional[int] = Field(default=None, description="创建时间戳")
+    owned_by: Optional[str] = Field(default=None, description="所有者")
+
+
+class FetchRemoteModelsResponse(BaseModel):
+    """获取远程模型列表响应"""
+
+    models: List[RemoteModelItem] = Field(..., description="远程模型列表")
+    total: int = Field(..., description="总数")
+    endpoint_id: str = Field(..., description="使用的端点 ID")
+    endpoint_base_url: str = Field(..., description="使用的端点 Base URL")
+
+
+class ImportRemoteModelsRequest(BaseModel):
+    """导入远程模型请求"""
+
+    model_ids: List[str] = Field(..., min_length=1, description="要导入的模型 ID 列表")
+
+
+class ImportRemoteModelsResponse(BaseModel):
+    """导入远程模型响应"""
+
+    success: List[dict] = Field(..., description="成功导入的模型")
+    errors: List[dict] = Field(..., description="导入失败的模型")
+
 __all__ = [
     "BatchAssignError",
     "BatchAssignModelMappingRequest",
@@ -416,11 +449,14 @@ __all__ = [
     "BatchAssignToProvidersRequest",
     "BatchAssignToProvidersResponse",
     "DeleteModelMappingResponse",
+    "FetchRemoteModelsResponse",
     "GlobalModelCreate",
     "GlobalModelListResponse",
     "GlobalModelResponse",
     "GlobalModelUpdate",
     "GlobalModelWithStats",
+    "ImportRemoteModelsRequest",
+    "ImportRemoteModelsResponse",
     "ModelCapabilities",
     "ModelCatalogItem",
     "ModelCatalogProviderDetail",
@@ -430,6 +466,7 @@ __all__ = [
     "ProviderAvailableSourceModel",
     "ProviderAvailableSourceModelsResponse",
     "ProviderModelPriceInfo",
+    "RemoteModelItem",
     "UpdateModelMappingRequest",
     "UpdateModelMappingResponse",
 ]

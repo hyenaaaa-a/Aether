@@ -6,15 +6,26 @@
         <h3 class="text-sm font-semibold flex items-center gap-2">
           模型列表
         </h3>
-        <Button
-          variant="outline"
-          size="sm"
-          class="h-8"
-          @click="openBatchAssignDialog"
-        >
-          <Layers class="w-3.5 h-3.5 mr-1.5" />
-          关联模型
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8"
+            @click="openFetchDialog"
+          >
+            <CloudDownload class="w-3.5 h-3.5 mr-1.5" />
+            拉取模型
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8"
+            @click="openBatchAssignDialog"
+          >
+            <Layers class="w-3.5 h-3.5 mr-1.5" />
+            关联模型
+          </Button>
+        </div>
       </div>
     </div>
 
@@ -209,7 +220,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Box, Edit, Trash2, Layers, Eye, Wrench, Zap, Brain, Power, Copy, Image } from 'lucide-vue-next'
+import { Box, Edit, Trash2, Layers, Eye, Wrench, Zap, Brain, Power, Copy, Image, CloudDownload } from 'lucide-vue-next'
 import Card from '@/components/ui/card.vue'
 import Button from '@/components/ui/button.vue'
 import { useToast } from '@/composables/useToast'
@@ -224,6 +235,7 @@ const emit = defineEmits<{
   'editModel': [model: Model]
   'deleteModel': [model: Model]
   'batchAssign': []
+  'fetchModels': []
 }>()
 
 const { error: showError, success: showSuccess } = useToast()
@@ -361,6 +373,11 @@ function deleteModel(model: Model) {
 // 打开批量关联对话框
 function openBatchAssignDialog() {
   emit('batchAssign')
+}
+
+// 打开拉取远程模型对话框
+function openFetchDialog() {
+  emit('fetchModels')
 }
 
 // 切换模型启用状态
