@@ -22,7 +22,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AETHER=4.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=4.0.0
 RUN pip install --no-cache-dir .
 
 
@@ -33,78 +33,78 @@ RUN npm ci
 
 # Nginx 配置模板
 RUN printf '%s\n' \
-'server {' \
-'    listen 80;' \
-'    server_name _;' \
-'    root /usr/share/nginx/html;' \
-'    index index.html;' \
-'    client_max_body_size 100M;' \
-'' \
-'    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {' \
-'        expires 1y;' \
-'        add_header Cache-Control "public, no-transform";' \
-'        try_files $uri =404;' \
-'    }' \
-'' \
-'    location ~ ^/(src|node_modules)/ {' \
-'        deny all;' \
-'        return 404;' \
-'    }' \
-'' \
-'    location ~ ^/(dashboard|admin|login)(/|$) {' \
-'        try_files $uri $uri/ /index.html;' \
-'    }' \
-'' \
-'    location / {' \
-'        try_files $uri $uri/ @backend;' \
-'    }' \
-'' \
-'    location @backend {' \
-'        proxy_pass http://127.0.0.1:PORT_PLACEHOLDER;' \
-'        proxy_http_version 1.1;' \
-'        proxy_set_header Host $host;' \
-'        proxy_set_header X-Real-IP $remote_addr;' \
-'        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
-'        proxy_set_header X-Forwarded-Proto $scheme;' \
-'        proxy_set_header Connection "";' \
-'        proxy_set_header Accept $http_accept;' \
-'        proxy_set_header Content-Type $content_type;' \
-'        proxy_set_header Authorization $http_authorization;' \
-'        proxy_set_header X-Api-Key $http_x_api_key;' \
-'        proxy_buffering off;' \
-'        proxy_cache off;' \
-'        proxy_request_buffering off;' \
-'        chunked_transfer_encoding on;' \
-'        proxy_connect_timeout 600s;' \
-'        proxy_send_timeout 600s;' \
-'        proxy_read_timeout 600s;' \
-'    }' \
-'}' > /etc/nginx/sites-available/default.template
+    'server {' \
+    '    listen 80;' \
+    '    server_name _;' \
+    '    root /usr/share/nginx/html;' \
+    '    index index.html;' \
+    '    client_max_body_size 100M;' \
+    '' \
+    '    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {' \
+    '        expires 1y;' \
+    '        add_header Cache-Control "public, no-transform";' \
+    '        try_files $uri =404;' \
+    '    }' \
+    '' \
+    '    location ~ ^/(src|node_modules)/ {' \
+    '        deny all;' \
+    '        return 404;' \
+    '    }' \
+    '' \
+    '    location ~ ^/(dashboard|admin|login)(/|$) {' \
+    '        try_files $uri $uri/ /index.html;' \
+    '    }' \
+    '' \
+    '    location / {' \
+    '        try_files $uri $uri/ @backend;' \
+    '    }' \
+    '' \
+    '    location @backend {' \
+    '        proxy_pass http://127.0.0.1:PORT_PLACEHOLDER;' \
+    '        proxy_http_version 1.1;' \
+    '        proxy_set_header Host $host;' \
+    '        proxy_set_header X-Real-IP $remote_addr;' \
+    '        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+    '        proxy_set_header X-Forwarded-Proto $scheme;' \
+    '        proxy_set_header Connection "";' \
+    '        proxy_set_header Accept $http_accept;' \
+    '        proxy_set_header Content-Type $content_type;' \
+    '        proxy_set_header Authorization $http_authorization;' \
+    '        proxy_set_header X-Api-Key $http_x_api_key;' \
+    '        proxy_buffering off;' \
+    '        proxy_cache off;' \
+    '        proxy_request_buffering off;' \
+    '        chunked_transfer_encoding on;' \
+    '        proxy_connect_timeout 600s;' \
+    '        proxy_send_timeout 600s;' \
+    '        proxy_read_timeout 600s;' \
+    '    }' \
+    '}' > /etc/nginx/sites-available/default.template
 
 # Supervisor 配置
 RUN printf '%s\n' \
-'[supervisord]' \
-'nodaemon=true' \
-'logfile=/var/log/supervisor/supervisord.log' \
-'pidfile=/var/run/supervisord.pid' \
-'' \
-'[program:nginx]' \
-'command=/bin/bash -c "sed \"s/PORT_PLACEHOLDER/${PORT:-8084}/g\" /etc/nginx/sites-available/default.template > /etc/nginx/sites-available/default && /usr/sbin/nginx -g \"daemon off;\""' \
-'autostart=true' \
-'autorestart=true' \
-'stdout_logfile=/var/log/nginx/access.log' \
-'stderr_logfile=/var/log/nginx/error.log' \
-'' \
-'[program:app]' \
-'command=gunicorn src.main:app -w %(ENV_GUNICORN_WORKERS)s -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:%(ENV_PORT)s --timeout 120 --access-logfile - --error-logfile - --log-level info' \
-'directory=/app' \
-'autostart=true' \
-'autorestart=true' \
-'stdout_logfile=/dev/stdout' \
-'stdout_logfile_maxbytes=0' \
-'stderr_logfile=/dev/stderr' \
-'stderr_logfile_maxbytes=0' \
-'environment=PYTHONUNBUFFERED=1,PYTHONIOENCODING=utf-8,LANG=C.UTF-8,LC_ALL=C.UTF-8,DOCKER_CONTAINER=true' > /etc/supervisor/conf.d/supervisord.conf
+    '[supervisord]' \
+    'nodaemon=true' \
+    'logfile=/var/log/supervisor/supervisord.log' \
+    'pidfile=/var/run/supervisord.pid' \
+    '' \
+    '[program:nginx]' \
+    'command=/bin/bash -c "sed \"s/PORT_PLACEHOLDER/${PORT:-8084}/g\" /etc/nginx/sites-available/default.template > /etc/nginx/sites-available/default && /usr/sbin/nginx -g \"daemon off;\""' \
+    'autostart=true' \
+    'autorestart=true' \
+    'stdout_logfile=/var/log/nginx/access.log' \
+    'stderr_logfile=/var/log/nginx/error.log' \
+    '' \
+    '[program:app]' \
+    'command=gunicorn src.main:app -w %(ENV_GUNICORN_WORKERS)s -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:%(ENV_PORT)s --timeout 120 --access-logfile - --error-logfile - --log-level info' \
+    'directory=/app' \
+    'autostart=true' \
+    'autorestart=true' \
+    'stdout_logfile=/dev/stdout' \
+    'stdout_logfile_maxbytes=0' \
+    'stderr_logfile=/dev/stderr' \
+    'stderr_logfile_maxbytes=0' \
+    'environment=PYTHONUNBUFFERED=1,PYTHONIOENCODING=utf-8,LANG=C.UTF-8,LC_ALL=C.UTF-8,DOCKER_CONTAINER=true' > /etc/supervisor/conf.d/supervisord.conf
 
 # 创建目录
 RUN mkdir -p /var/log/supervisor /app/logs /app/data /usr/share/nginx/html
