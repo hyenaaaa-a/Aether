@@ -57,6 +57,37 @@ def _check_nested_error(response: Dict[str, Any]) -> Tuple[bool, Optional[Dict[s
     return False, None
 
 
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _extract_openai_usage_dict(response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    usage = response.get("usage")
+    if isinstance(usage, dict):
+        return usage
+
+    nested_response = response.get("response")
+    if isinstance(nested_response, dict):
+        nested_usage = nested_response.get("usage")
+        if isinstance(nested_usage, dict):
+            return nested_usage
+
+    return None
+
+
 class OpenAIResponseParser(ResponseParser):
     """OpenAI 格式响应解析器"""
 
@@ -119,9 +150,12 @@ class OpenAIResponseParser(ResponseParser):
         result.response_id = response.get("id")
 
         # 提取 usage
-        usage = response.get("usage", {})
-        result.input_tokens = usage.get("prompt_tokens", 0)
-        result.output_tokens = usage.get("completion_tokens", 0)
+        usage = self.extract_usage_from_response(response)
+        if usage:
+            result.input_tokens = usage.get("input_tokens", 0)
+            result.output_tokens = usage.get("output_tokens", 0)
+            result.cache_creation_tokens = usage.get("cache_creation_tokens", 0)
+            result.cache_read_tokens = usage.get("cache_read_tokens", 0)
 
         # 检查错误（支持嵌套错误格式）
         is_error, error_info = _check_nested_error(response)
@@ -133,21 +167,62 @@ class OpenAIResponseParser(ResponseParser):
         return result
 
     def extract_usage_from_response(self, response: Dict[str, Any]) -> Dict[str, int]:
-        usage = response.get("usage", {})
+        usage = _extract_openai_usage_dict(response)
+        if not usage:
+            return {}
+
+        # Chat Completions: prompt_tokens / completion_tokens
+        input_tokens = _safe_int(usage.get("prompt_tokens"))
+        output_tokens = _safe_int(usage.get("completion_tokens"))
+
+        # Responses API: input_tokens / output_tokens
+        if input_tokens is None:
+            input_tokens = _safe_int(usage.get("input_tokens"))
+        if output_tokens is None:
+            output_tokens = _safe_int(usage.get("output_tokens"))
+
+        cache_read_tokens = _safe_int(usage.get("cache_read_tokens"))
+        cache_creation_tokens = _safe_int(usage.get("cache_creation_tokens"))
+
+        if cache_read_tokens is None:
+            cache_read_tokens = _safe_int(usage.get("cached_tokens"))
+
+        input_details = usage.get("input_tokens_details")
+        if isinstance(input_details, dict):
+            if cache_read_tokens is None:
+                cache_read_tokens = _safe_int(input_details.get("cached_tokens"))
+            if cache_creation_tokens is None:
+                cache_creation_tokens = _safe_int(input_details.get("cache_creation_tokens"))
+
+        if (
+            input_tokens is None
+            and output_tokens is None
+            and cache_read_tokens is None
+            and cache_creation_tokens is None
+        ):
+            return {}
+
         return {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-            "cache_creation_tokens": 0,
-            "cache_read_tokens": 0,
+            "input_tokens": input_tokens or 0,
+            "output_tokens": output_tokens or 0,
+            "cache_creation_tokens": cache_creation_tokens or 0,
+            "cache_read_tokens": cache_read_tokens or 0,
         }
 
     def extract_text_content(self, response: Dict[str, Any]) -> str:
         choices = response.get("choices", [])
         if choices:
+            delta = choices[0].get("delta")
+            if isinstance(delta, dict):
+                content = delta.get("content")
+                if isinstance(content, str) and content:
+                    return content
+
             message = choices[0].get("message", {})
-            content = message.get("content")
-            if content:
-                return content
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content:
+                    return content
         return ""
 
     def is_error_response(self, response: Dict[str, Any]) -> bool:
