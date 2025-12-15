@@ -90,6 +90,27 @@ def get_available_provider_ids(db: Session, api_formats: list[str]) -> set[str]:
     return {row[0] for row in rows}
 
 
+def get_all_available_provider_ids(db: Session) -> set[str]:
+    """
+    返回所有有可用端点的 Provider IDs（不限制 api_format）
+
+    条件:
+    - 端点是活跃的
+    - 端点下有活跃的 Key
+    """
+    rows = (
+        db.query(ProviderEndpoint.provider_id)
+        .join(ProviderAPIKey, ProviderAPIKey.endpoint_id == ProviderEndpoint.id)
+        .filter(
+            ProviderEndpoint.is_active.is_(True),
+            ProviderAPIKey.is_active.is_(True),
+        )
+        .distinct()
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
 def _get_available_model_ids_for_format(db: Session, api_formats: list[str]) -> set[str]:
     """
     获取指定格式下真正可用的模型 ID 集合

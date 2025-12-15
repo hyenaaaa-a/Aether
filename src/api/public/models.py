@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from src.api.base.models_service import (
     ModelInfo,
     find_model_by_id,
+    get_all_available_provider_ids,
     get_available_provider_ids,
     list_available_models,
 )
@@ -379,9 +380,8 @@ async def list_models(
     if not user:
         return _build_auth_error_response(api_format)
 
-    formats = _get_formats_for_api(api_format)
-
-    available_provider_ids = get_available_provider_ids(db, formats)
+    # 获取所有可用的 Provider IDs（不限制 api_format）
+    available_provider_ids = get_all_available_provider_ids(db)
     if not available_provider_ids:
         if api_format == "claude":
             return {"data": [], "has_more": False, "first_id": None, "last_id": None}
@@ -390,7 +390,8 @@ async def list_models(
         else:
             return {"object": "list", "data": []}
 
-    models = await list_available_models(db, available_provider_ids, formats)
+    # 获取所有模型（不限制 api_format）
+    models = await list_available_models(db, available_provider_ids, api_formats=None)
     logger.debug(f"[Models] 返回 {len(models)} 个模型")
 
     if api_format == "claude":
@@ -423,10 +424,9 @@ async def retrieve_model(
     if not user:
         return _build_auth_error_response(api_format)
 
-    formats = _get_formats_for_api(api_format)
-
-    available_provider_ids = get_available_provider_ids(db, formats)
-    model_info = find_model_by_id(db, model_id, available_provider_ids, formats)
+    # 获取所有可用的 Provider IDs（不限制 api_format）
+    available_provider_ids = get_all_available_provider_ids(db)
+    model_info = find_model_by_id(db, model_id, available_provider_ids, api_formats=None)
 
     if not model_info:
         return _build_404_response(model_id, api_format)
@@ -459,11 +459,13 @@ async def list_models_gemini(
     if not user:
         return _build_auth_error_response("gemini")
 
-    available_provider_ids = get_available_provider_ids(db, _GEMINI_FORMATS)
+    # 获取所有可用的 Provider IDs（不限制 api_format）
+    available_provider_ids = get_all_available_provider_ids(db)
     if not available_provider_ids:
         return {"models": []}
 
-    models = await list_available_models(db, available_provider_ids, _GEMINI_FORMATS)
+    # 获取所有模型（不限制 api_format）
+    models = await list_available_models(db, available_provider_ids, api_formats=None)
     logger.debug(f"[Models] 返回 {len(models)} 个模型")
     response = _build_gemini_list_response(models, page_size, page_token)
     logger.debug(f"[Models] Gemini 响应: {response}")
@@ -490,8 +492,9 @@ async def get_model_gemini(
     if not user:
         return _build_auth_error_response("gemini")
 
-    available_provider_ids = get_available_provider_ids(db, _GEMINI_FORMATS)
-    model_info = find_model_by_id(db, model_id, available_provider_ids, _GEMINI_FORMATS)
+    # 获取所有可用的 Provider IDs（不限制 api_format）
+    available_provider_ids = get_all_available_provider_ids(db)
+    model_info = find_model_by_id(db, model_id, available_provider_ids, api_formats=None)
 
     if not model_info:
         return _build_404_response(model_id, "gemini")
