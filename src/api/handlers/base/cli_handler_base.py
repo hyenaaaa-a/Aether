@@ -499,6 +499,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
             query_params=query_params,
             path_params={"model": url_model},
             is_stream=True,  # CLI handler 处理流式请求
+            is_responses_request=(self.FORMAT_ID == "OPENAI_CLI"),
         )
 
         # 配置超时
@@ -1364,6 +1365,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
                 query_params=query_params,
                 path_params={"model": url_model},
                 is_stream=False,  # 非流式请求
+                is_responses_request=(self.FORMAT_ID == "OPENAI_CLI"),
             )
 
             logger.info(f"  └─ [{self.request_id}] 发送非流式请求: "

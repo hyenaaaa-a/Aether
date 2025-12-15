@@ -74,6 +74,7 @@ def build_provider_url(
     query_params: Optional[Dict[str, Any]] = None,
     path_params: Optional[Dict[str, Any]] = None,
     is_stream: bool = False,
+    is_responses_request: bool = False,
 ) -> str:
     """
     根据 endpoint 配置生成请求 URL
@@ -87,6 +88,7 @@ def build_provider_url(
         query_params: 查询参数
         path_params: 路径模板参数 (如 {model})
         is_stream: 是否为流式请求，用于 Gemini API 选择正确的操作方法
+        is_responses_request: 是否为 /v1/responses 请求，用于 OPENAI 端点选择正确路径
     """
     base = endpoint.base_url.rstrip("/")
 
@@ -111,8 +113,13 @@ def build_provider_url(
                 # 如果模板变量不匹配，保持原路径
                 pass
     else:
-        # 使用 API 格式的默认路径
-        path = _resolve_default_path(endpoint.api_format)
+        # 特殊处理：OPENAI 端点的 /v1/responses 请求
+        # 当 is_responses_request=True 且端点为 OPENAI 格式时，使用 /v1/responses 路径
+        if is_responses_request and resolved_format == APIFormat.OPENAI:
+            path = "/v1/responses"
+        else:
+            # 使用 API 格式的默认路径
+            path = _resolve_default_path(endpoint.api_format)
         if effective_path_params:
             try:
                 path = path.format(**effective_path_params)

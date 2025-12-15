@@ -921,7 +921,17 @@ class CacheAwareScheduler:
                     if isinstance(endpoint.api_format, str)
                     else endpoint.api_format.value
                 )
-                if not endpoint.is_active or endpoint_format_str != target_format.value:
+                
+                # 格式匹配检查
+                format_match = endpoint_format_str == target_format.value
+                
+                # 兼容检查：OPENAI_CLI 请求可以使用 OPENAI 端点（如果 custom_path 为空）
+                # 这允许 /v1/responses 请求通过 OPENAI 格式的提供商，使用 /v1/responses 路径
+                if not format_match and target_format == APIFormat.OPENAI_CLI:
+                    if endpoint_format_str == APIFormat.OPENAI.value and not endpoint.custom_path:
+                        format_match = True
+                
+                if not endpoint.is_active or not format_match:
                     continue
 
                 # 检查 Endpoint 是否在允许列表中
