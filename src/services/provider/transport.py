@@ -75,20 +75,24 @@ def build_provider_url(
     path_params: Optional[Dict[str, Any]] = None,
     is_stream: bool = False,
     is_responses_request: bool = False,
+    client_path: Optional[str] = None,
 ) -> str:
     """
     根据 endpoint 配置生成请求 URL
 
     优先级：
     1. endpoint.custom_path - 自定义路径（支持模板变量如 {model}）
-    2. API 格式默认路径 - 根据 api_format 自动选择
+    2. client_path - 客户端原始请求路径（自适应路由）
+    3. is_responses_request - 向后兼容的 /v1/responses 特殊处理
+    4. API 格式默认路径 - 根据 api_format 自动选择
 
     Args:
         endpoint: 端点配置
         query_params: 查询参数
         path_params: 路径模板参数 (如 {model})
         is_stream: 是否为流式请求，用于 Gemini API 选择正确的操作方法
-        is_responses_request: 是否为 /v1/responses 请求，用于 OPENAI 端点选择正确路径
+        is_responses_request: 是否为 /v1/responses 请求（向后兼容）
+        client_path: 客户端原始请求路径（用于自适应路由，优先于 is_responses_request）
     """
     base = endpoint.base_url.rstrip("/")
 
@@ -113,9 +117,13 @@ def build_provider_url(
                 # 如果模板变量不匹配，保持原路径
                 pass
     else:
-        # 特殊处理：OPENAI 端点的 /v1/responses 请求
-        # 当 is_responses_request=True 且端点为 OPENAI 格式时，使用 /v1/responses 路径
-        if is_responses_request and resolved_format == APIFormat.OPENAI:
+        # 自适应路由：当 custom_path 为空时，尝试使用客户端原始请求路径
+        # 优先级：client_path > is_responses_request > 默认路径
+        if client_path:
+            # 使用客户端原始请求路径（自适应路由）
+            path = client_path
+        elif is_responses_request and resolved_format == APIFormat.OPENAI:
+            # 向后兼容：/v1/responses 特殊处理
             path = "/v1/responses"
         else:
             # 使用 API 格式的默认路径

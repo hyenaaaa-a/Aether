@@ -127,6 +127,7 @@ class CliAdapterBase(ApiAdapter):
                 start_time=start_time,
                 allowed_api_formats=self.allowed_api_formats,
                 adapter_detector=self.detect_capability_requirements,
+                client_path=str(http_request.url.path),  # 传递客户端原始请求路径
             )
 
             # 处理请求

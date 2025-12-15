@@ -150,6 +150,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
         start_time: float,
         allowed_api_formats: Optional[list] = None,
         adapter_detector: Optional[Callable[[Dict[str, str], Optional[Dict[str, Any]]], Dict[str, bool]]] = None,
+        client_path: Optional[str] = None,
     ):
         allowed = allowed_api_formats or [self.FORMAT_ID]
         super().__init__(
@@ -165,6 +166,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
         )
         self._parser: Optional[ResponseParser] = None
         self._request_builder = PassthroughRequestBuilder()
+        self._client_path = client_path  # 客户端原始请求路径（用于自适应路由）
 
     @property
     def parser(self) -> ResponseParser:
@@ -499,7 +501,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
             query_params=query_params,
             path_params={"model": url_model},
             is_stream=True,  # CLI handler 处理流式请求
-            is_responses_request=(self.FORMAT_ID == "OPENAI_CLI"),
+            client_path=self._client_path,
         )
 
         # 配置超时
@@ -1365,7 +1367,7 @@ class CliMessageHandlerBase(BaseMessageHandler):
                 query_params=query_params,
                 path_params={"model": url_model},
                 is_stream=False,  # 非流式请求
-                is_responses_request=(self.FORMAT_ID == "OPENAI_CLI"),
+                client_path=self._client_path,
             )
 
             logger.info(f"  └─ [{self.request_id}] 发送非流式请求: "
