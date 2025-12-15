@@ -4,11 +4,51 @@ from typing import Any, Dict, Optional
 
 from src.core.logger import logger
 from src.models.claude import ClaudeResponse
+from src.models.openai import OpenAIResponse
 
 
 
 class ResponseNormalizer:
     """响应标准化器 - 用于标准模式下验证和补全响应字段"""
+
+    @staticmethod
+    def normalize_openai_response(
+        response_data: Dict[str, Any],
+        request_id: Optional[str] = None,
+        *,
+        strict: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        æ ‡å‡†åŒ?OpenAI Chat Completions API å“åº”
+
+        Args:
+            response_data: åŽŸå§‹å“åº”æ•°æ®
+            request_id: è¯·æ±‚IDï¼ˆç”¨äºŽæ—¥å¿—ï¼‰
+            strict: ä¸º True æ—¶ï¼ŒéªŒè¯å¤±è´¥å°†æŠ›å‡ºå¼‚å¸¸
+
+        Returns:
+            æ ‡å‡†åŒ–åŽçš„å“åº”æ•°æ®ï¼ˆå¤±è´¥æ—¶è¿”å›žåŽŸå§‹æ•°æ®ï¼‰
+        """
+        if "error" in response_data:
+            logger.debug(
+                f"[ResponseNormalizer] æ£€æµ‹åˆ°é”™è¯¯å“åº”ï¼Œè·³è¿‡æ ‡å‡†åŒ– | ID:{request_id}"
+            )
+            return response_data
+
+        try:
+            validated = OpenAIResponse.model_validate(response_data)
+            normalized = validated.model_dump(mode="json", exclude_none=False)
+
+            logger.debug(f"[ResponseNormalizer] å“åº”æ ‡å‡†åŒ–æˆåŠ?| ID:{request_id}")
+            return normalized
+
+        except Exception:
+            logger.debug(
+                f"[ResponseNormalizer] å“åº”éªŒè¯å¤±è´¥ï¼Œé€ä¼ åŽŸå§‹æ•°æ® | ID:{request_id}"
+            )
+            if strict:
+                raise
+            return response_data
 
     @staticmethod
     def normalize_claude_response(
