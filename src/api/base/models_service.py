@@ -25,13 +25,15 @@ _CACHE_KEY_PREFIX = "models:list"
 _CACHE_TTL = CacheTTL.MODEL  # 300 秒
 
 
-def _get_cache_key(api_formats: list[str]) -> str:
+def _get_cache_key(api_formats: Optional[list[str]]) -> str:
     """生成缓存 key"""
+    if api_formats is None:
+        return f"{_CACHE_KEY_PREFIX}:all"
     formats_str = ",".join(sorted(api_formats))
     return f"{_CACHE_KEY_PREFIX}:{formats_str}"
 
 
-async def _get_cached_models(api_formats: list[str]) -> Optional[list["ModelInfo"]]:
+async def _get_cached_models(api_formats: Optional[list[str]]) -> Optional[list["ModelInfo"]]:
     """从缓存获取模型列表"""
     cache_key = _get_cache_key(api_formats)
     try:
@@ -44,7 +46,7 @@ async def _get_cached_models(api_formats: list[str]) -> Optional[list["ModelInfo
     return None
 
 
-async def _set_cached_models(api_formats: list[str], models: list["ModelInfo"]) -> None:
+async def _set_cached_models(api_formats: Optional[list[str]], models: list["ModelInfo"]) -> None:
     """将模型列表写入缓存"""
     cache_key = _get_cache_key(api_formats)
     try:
@@ -216,7 +218,8 @@ def _extract_model_info(model: Any) -> ModelInfo:
     # 使用别名格式：provider_name/global_model_name
     if global_model:
         model_id = f"{provider_name}/{global_model.name}"
-        display_name = global_model.display_name
+        # display_name 也使用别名格式
+        display_name = f"{provider_name}/{global_model.display_name}"
         description = global_model.description
     else:
         model_id = model.provider_model_name
@@ -257,11 +260,10 @@ async def list_available_models(
     if not available_provider_ids:
         return []
 
-    # 尝试从缓存获取
-    if api_formats:
-        cached = await _get_cached_models(api_formats)
-        if cached is not None:
-            return cached
+    # 尝试从缓存获取（支持 api_formats=None 的情况）
+    cached = await _get_cached_models(api_formats)
+    if cached is not None:
+        return cached
 
     # 如果提供了 api_formats，获取真正可用的模型 ID
     available_model_ids: Optional[set[str]] = None
@@ -299,9 +301,8 @@ async def list_available_models(
 
         result.append(info)
 
-    # 写入缓存
-    if api_formats:
-        await _set_cached_models(api_formats, result)
+    # 写入缓存（支持 api_formats=None 的情况）
+    await _set_cached_models(api_formats, result)
 
     return result
 
