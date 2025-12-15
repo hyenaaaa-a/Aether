@@ -39,8 +39,28 @@ class GeminiChatAdapter(ChatAdapterBase):
         logger.info(f"[{self.name}] 初始化 Gemini Chat 适配器 | API格式: {self.allowed_api_formats}")
 
     def extract_api_key(self, request: Request) -> Optional[str]:
-        """从请求中提取 API 密钥 (x-goog-api-key)"""
-        return request.headers.get("x-goog-api-key")
+        """
+        从请求中提取客户端 API 密钥。
+
+        Gemini 客户端在不同环境下可能通过不同方式携带 key：
+        - Header: x-goog-api-key（推荐）
+        - Query: ?key=（某些 SDK/浏览器场景更常见，如无法自定义 header 的 SSE）
+        - Header: Authorization: Bearer <key>（兼容部分通用客户端）
+        """
+        header_key = request.headers.get("x-goog-api-key")
+        if header_key:
+            return header_key
+
+        query_key = request.query_params.get("key")
+        if query_key:
+            return query_key
+
+        authorization = request.headers.get("authorization")
+        if authorization and authorization.lower().startswith("bearer "):
+            return authorization[7:].strip() or None
+
+        # 兼容少数客户端使用 x-api-key
+        return request.headers.get("x-api-key")
 
     def _merge_path_params(
         self, original_request_body: Dict[str, Any], path_params: Dict[str, Any]  # noqa: ARG002

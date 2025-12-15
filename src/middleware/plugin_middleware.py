@@ -108,6 +108,18 @@ class PluginMiddleware(BaseHTTPMiddleware):
             # 处理请求
             response = await call_next(request)
 
+            # 由于禁用了 uvicorn access log，路由未命中（404）通常不会产生业务日志。
+            # 对 Gemini v1beta 相关路径做一次轻量记录，便于排查客户端请求路径问题。
+            try:
+                if response.status_code == 404:
+                    path = request.url.path
+                    if path.startswith("/v1beta") or path.startswith("/v1/models"):
+                        logger.warning(
+                            f"[404] {request.method} {path} | request_id={getattr(request.state, 'request_id', '')}"
+                        )
+            except Exception:
+                pass
+
             # 3. 提交关键数据库事务（在返回响应前）
             # 这确保了 Usage 记录、配额扣减等关键数据在响应返回前持久化
             try:

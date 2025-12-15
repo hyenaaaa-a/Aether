@@ -34,8 +34,27 @@ class GeminiCliAdapter(CliAdapterBase):
         super().__init__(allowed_api_formats or ["GEMINI_CLI"])
 
     def extract_api_key(self, request: Request) -> Optional[str]:
-        """从请求中提取 API 密钥 (x-goog-api-key)"""
-        return request.headers.get("x-goog-api-key")
+        """
+        从请求中提取客户端 API 密钥。
+
+        兼容：
+        - Header: x-goog-api-key
+        - Query: ?key=
+        - Header: Authorization: Bearer <key>
+        """
+        header_key = request.headers.get("x-goog-api-key")
+        if header_key:
+            return header_key
+
+        query_key = request.query_params.get("key")
+        if query_key:
+            return query_key
+
+        authorization = request.headers.get("authorization")
+        if authorization and authorization.lower().startswith("bearer "):
+            return authorization[7:].strip() or None
+
+        return request.headers.get("x-api-key")
 
     def _merge_path_params(
         self, original_request_body: Dict[str, Any], path_params: Dict[str, Any]  # noqa: ARG002

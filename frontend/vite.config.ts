@@ -70,6 +70,11 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
       },
+      '/v1beta': {
+        target: 'http://localhost:8084',  // 本地开发端口
+        changeOrigin: true,
+        secure: false,
+      },
       '/health': {
         target: 'http://localhost:8084',  // 本地开发端口
         changeOrigin: true,

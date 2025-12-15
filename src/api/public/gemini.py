@@ -5,11 +5,9 @@ Gemini API 专属端点
 - /v1beta/models/{model}:generateContent
 - /v1beta/models/{model}:streamGenerateContent
 
-注意: Gemini API 的 model 在 URL 路径中，而不是请求体中
-
-路径配置来源: src.core.api_format_metadata.APIFormat.GEMINI
-- path_prefix: 本站路径前缀（如 /gemini），通过 router prefix 配置
-- default_path: 标准 API 路径模板
+注意:
+- Gemini API 的 model 在 URL 路径中，而不是请求体中
+- /v1beta/models (列表) 和 /v1beta/models/{model} (详情) 由 models.py 统一处理
 """
 
 from fastapi import APIRouter, Depends, Request
@@ -27,6 +25,25 @@ _gemini_def = get_api_format_definition(APIFormat.GEMINI)
 
 router = APIRouter(tags=["Gemini API"], prefix=_gemini_def.path_prefix)
 pipeline = ApiRequestPipeline()
+
+
+@router.get("/v1beta", include_in_schema=False)
+@router.get("/v1beta/", include_in_schema=False)
+async def gemini_v1beta_root() -> dict:
+    """
+    Gemini SDK/客户端有时会先探测 `/v1beta` 根路径。
+
+    Aether 的 Gemini 端点实际位于 `/v1beta/models/...`，这里返回 200 以避免 404。
+    """
+    return {
+        "service": "gemini",
+        "version": "v1beta",
+        "endpoints": [
+            "/v1beta/models",
+            "/v1beta/models/{model}:generateContent",
+            "/v1beta/models/{model}:streamGenerateContent",
+        ],
+    }
 
 
 def _is_cli_request(request: Request) -> bool:
@@ -51,7 +68,7 @@ def _is_cli_request(request: Request) -> bool:
     return False
 
 
-@router.post("/v1beta/models/{model}:generateContent")
+@router.post("/v1beta/models/{model:path}:generateContent")
 async def generate_content(
     model: str,
     http_request: Request,
@@ -79,7 +96,7 @@ async def generate_content(
     )
 
 
-@router.post("/v1beta/models/{model}:streamGenerateContent")
+@router.post("/v1beta/models/{model:path}:streamGenerateContent")
 async def stream_generate_content(
     model: str,
     http_request: Request,
@@ -109,8 +126,8 @@ async def stream_generate_content(
     )
 
 
-# 兼容 v1 路径（部分 SDK 可能使用）
-@router.post("/v1/models/{model}:generateContent")
+# 兼容 v1 路径（部分 SDK 可能使用 generateContent）
+@router.post("/v1/models/{model:path}:generateContent")
 async def generate_content_v1(
     model: str,
     http_request: Request,
@@ -120,7 +137,7 @@ async def generate_content_v1(
     return await generate_content(model, http_request, db)
 
 
-@router.post("/v1/models/{model}:streamGenerateContent")
+@router.post("/v1/models/{model:path}:streamGenerateContent")
 async def stream_generate_content_v1(
     model: str,
     http_request: Request,
