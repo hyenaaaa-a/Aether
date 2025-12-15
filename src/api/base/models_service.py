@@ -133,7 +133,7 @@ def _get_available_model_ids_for_format(db: Session, api_formats: list[str]) -> 
     # 只查询那些有匹配格式端点的 Provider 下的模型
     models = (
         db.query(Model)
-        .options(joinedload(Model.global_model))
+        .options(joinedload(Model.global_model), joinedload(Model.provider))
         .join(Provider)
         .filter(
             Model.provider_id.in_(provider_ids_with_format),
@@ -148,7 +148,16 @@ def _get_available_model_ids_for_format(db: Session, api_formats: list[str]) -> 
     for model in models:
         model_provider_id = model.provider_id
         global_model = model.global_model
-        model_id = global_model.name if global_model else model.provider_model_name  # type: ignore
+        provider = model.provider
+        provider_name = provider.name if provider else "unknown"
+        
+        # 使用别名格式：provider_name/global_model_name
+        if global_model:
+            model_id = f"{provider_name}/{global_model.name}"
+            global_model_name = global_model.name
+        else:
+            model_id = model.provider_model_name
+            global_model_name = None
 
         if not model_provider_id or not model_id:
             continue
@@ -164,12 +173,14 @@ def _get_available_model_ids_for_format(db: Session, api_formats: list[str]) -> 
                 # null = 允许该 Provider 关联的所有模型（已通过上面的查询限制）
                 available_model_ids.add(model_id)
                 break
+            # 检查别名格式、原始 global model name、provider_model_name
             elif model_id in allowed_models:
-                # 明确在允许列表中
                 available_model_ids.add(model_id)
                 break
-            elif global_model and model.provider_model_name in allowed_models:
-                # 也检查 provider_model_name
+            elif global_model_name and global_model_name in allowed_models:
+                available_model_ids.add(model_id)
+                break
+            elif model.provider_model_name in allowed_models:
                 available_model_ids.add(model_id)
                 break
 
@@ -179,14 +190,22 @@ def _get_available_model_ids_for_format(db: Session, api_formats: list[str]) -> 
 def _extract_model_info(model: Any) -> ModelInfo:
     """从 Model 对象提取 ModelInfo"""
     global_model = model.global_model
-    model_id: str = global_model.name if global_model else model.provider_model_name
-    display_name: str = global_model.display_name if global_model else model.provider_model_name
-    description: Optional[str] = global_model.description if global_model else None
+    provider_name: str = model.provider.name if model.provider else "unknown"
+    
+    # 使用别名格式：provider_name/global_model_name
+    if global_model:
+        model_id = f"{provider_name}/{global_model.name}"
+        display_name = global_model.display_name
+        description = global_model.description
+    else:
+        model_id = model.provider_model_name
+        display_name = model.provider_model_name
+        description = None
+    
     created_at: Optional[str] = (
         model.created_at.strftime("%Y-%m-%dT%H:%M:%SZ") if model.created_at else None
     )
     created_timestamp: int = int(model.created_at.timestamp()) if model.created_at else 0
-    provider_name: str = model.provider.name if model.provider else "unknown"
 
     return ModelInfo(
         id=model_id,
@@ -276,13 +295,14 @@ def find_model_by_id(
     按 ID 查找模型
 
     查找顺序：
-    1. 先按 GlobalModel.name 查找
-    2. 如果没找到任何候选，再按 provider_model_name 查找
-    3. 如果有候选但都不可用，返回 None（不回退）
+    1. 如果是别名格式 (provider_name/model_name)，按 Provider.name 和 GlobalModel.name 查找
+    2. 否则按 GlobalModel.name 查找
+    3. 如果没找到任何候选，再按 provider_model_name 查找
+    4. 如果有候选但都不可用，返回 None（不回退）
 
     Args:
         db: 数据库会话
-        model_id: 模型 ID
+        model_id: 模型 ID (可以是 provider_name/model_name 格式或原始名称)
         available_provider_ids: 有可用端点的 Provider ID 集合
         api_formats: API 格式列表，用于检查 Key 的 allowed_models
 
@@ -298,6 +318,40 @@ def find_model_by_id(
         available_model_ids = _get_available_model_ids_for_format(db, api_formats)
         # 快速检查：如果目标模型不在可用列表中，直接返回 None
         if available_model_ids is not None and model_id not in available_model_ids:
+            return None
+
+    # 检查是否是别名格式 (provider_name/model_name)
+    if "/" in model_id:
+        parts = model_id.split("/", 1)
+        provider_name = parts[0]
+        global_model_name = parts[1]
+        
+        # 按 Provider.name 和 GlobalModel.name 查找
+        models_by_alias = (
+            db.query(Model)
+            .options(joinedload(Model.global_model), joinedload(Model.provider))
+            .join(Provider)
+            .join(GlobalModel, Model.global_model_id == GlobalModel.id)
+            .filter(
+                Provider.name == provider_name,
+                GlobalModel.name == global_model_name,
+                Model.is_active.is_(True),
+                Provider.is_active.is_(True),
+            )
+            .order_by(Model.created_at.desc())
+            .all()
+        )
+        
+        model = next(
+            (m for m in models_by_alias if m.provider_id in available_provider_ids),
+            None,
+        )
+        
+        if model:
+            return _extract_model_info(model)
+        
+        # 如果有候选但都不可用，直接返回 None
+        if models_by_alias:
             return None
 
     # 先按 GlobalModel.name 查找
@@ -348,3 +402,4 @@ def find_model_by_id(
         return None
 
     return _extract_model_info(model)
+
