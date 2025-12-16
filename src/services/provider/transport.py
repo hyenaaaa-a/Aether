@@ -140,11 +140,18 @@ def build_provider_url(
 
     url = f"{base}{path}"
 
-    # 添加查询参数
+    # 添加查询参数（过滤敏感参数）
     if query_params:
-        query_string = urlencode(query_params, doseq=True)
-        if query_string:
-            url = f"{url}?{query_string}"
+        # 过滤敏感的认证查询参数，防止客户端凭证被转发到上游
+        sensitive_params = {"key", "api_key", "apikey", "token", "access_token"}
+        filtered_params = {
+            k: v for k, v in query_params.items() 
+            if k.lower() not in sensitive_params
+        }
+        if filtered_params:
+            query_string = urlencode(filtered_params, doseq=True)
+            if query_string:
+                url = f"{url}?{query_string}"
 
     return url
 
