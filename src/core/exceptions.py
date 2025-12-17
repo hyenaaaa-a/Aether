@@ -188,12 +188,17 @@ class ProviderNotAvailableException(ProviderException):
         message: str,
         provider_name: Optional[str] = None,
         request_metadata: Optional[Any] = None,
+        upstream_error: Optional[str] = None,
     ):
+        self.upstream_error = upstream_error
         super().__init__(
             message=message,
             provider_name=provider_name,
             request_metadata=request_metadata,
         )
+        # 将上游错误添加到 details 中，使其在 API 响应中可见
+        if upstream_error:
+            self.details["upstream_error"] = upstream_error
 
 
 class ProviderTimeoutException(ProviderException):

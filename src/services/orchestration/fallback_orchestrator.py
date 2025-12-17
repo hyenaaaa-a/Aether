@@ -486,6 +486,7 @@ class FallbackOrchestrator:
         max_attempts = 0
         last_error: Optional[Exception] = None
         last_candidate: Optional[ProviderCandidate] = None
+        last_error_message: Optional[str] = None  # 保存最后一个上游错误消息
 
         for candidate_index, candidate in enumerate(all_candidates):
             last_candidate = candidate
@@ -520,12 +521,16 @@ class FallbackOrchestrator:
             max_attempts = result["max_attempts"]
             if result.get("error"):
                 last_error = result["error"]
+            if result.get("error_message"):
+                last_error_message = result["error_message"]
             if result.get("should_raise") and last_error is not None:
                 self._attach_metadata_to_error(last_error, last_candidate, model_name, api_format_enum)
                 raise last_error
 
         # 所有组合都已尝试完毕，全部失败
-        self._raise_all_failed_exception(request_id, max_attempts, last_candidate, model_name, api_format_enum)
+        self._raise_all_failed_exception(
+            request_id, max_attempts, last_candidate, model_name, api_format_enum, last_error_message
+        )
 
     async def _try_candidate_with_retries(
         self,
@@ -547,6 +552,7 @@ class FallbackOrchestrator:
         provider = candidate.provider
         endpoint = candidate.endpoint
         max_retries_for_candidate = int(endpoint.max_retries) if candidate.is_cached else 1
+        last_error_message: Optional[str] = None  # 保存该候选的最后一个错误消息
 
         for retry_index in range(max_retries_for_candidate):
             attempt_counter += 1
@@ -581,6 +587,9 @@ class FallbackOrchestrator:
                 return {"success": True, "response": response}
 
             except ExecutionError as exec_err:
+                # 提取上游错误消息
+                last_error_message = self._extract_upstream_error_message(exec_err)
+
                 action = await self._handle_candidate_error(
                     exec_err=exec_err,
                     candidate=candidate,
@@ -604,12 +613,14 @@ class FallbackOrchestrator:
                         "success": False,
                         "should_raise": True,
                         "error": exec_err.cause,
+                        "error_message": last_error_message,
                         "attempt_counter": attempt_counter,
                         "max_attempts": max_attempts,
                     }
 
         return {
             "success": False,
+            "error_message": last_error_message,
             "attempt_counter": attempt_counter,
             "max_attempts": max_attempts,
         }
@@ -653,6 +664,39 @@ class FallbackOrchestrator:
         # 使用 setattr 避免类型检查错误
         setattr(error, "request_metadata", metadata)
 
+    def _extract_upstream_error_message(self, exec_err: ExecutionError) -> Optional[str]:
+        """
+        从 ExecutionError 中提取上游错误消息
+
+        Args:
+            exec_err: 执行错误对象
+
+        Returns:
+            提取的错误消息，如果无法提取则返回 None
+        """
+        cause = exec_err.cause
+
+        # 处理 HTTP 错误，尝试从响应体提取错误消息
+        if isinstance(cause, httpx.HTTPStatusError):
+            try:
+                if cause.response and hasattr(cause.response, "text"):
+                    error_text = cause.response.text[:500]  # 限制长度
+                    # 使用 ErrorClassifier 的方法提取可读消息
+                    if self._error_classifier:
+                        return self._error_classifier._extract_error_message(error_text)
+                    return error_text
+            except Exception:
+                pass
+            return f"HTTP {cause.response.status_code}" if cause.response else str(cause)
+
+        # 对于其他异常，使用字符串表示
+        error_msg = str(cause)
+        if not error_msg:
+            error_msg = repr(cause)
+
+        return error_msg[:500] if error_msg else None
+
+
     def _raise_all_failed_exception(
         self,
         request_id: Optional[str],
@@ -660,9 +704,10 @@ class FallbackOrchestrator:
         last_candidate: Optional[ProviderCandidate],
         model_name: str,
         api_format_enum: APIFormat,
+        last_error_message: Optional[str] = None,
     ) -> NoReturn:
         """所有组合都失败时抛出异常"""
-        logger.error(f"  [{request_id}] 所有 {max_attempts} 个组合均失败")
+        logger.error(f"  [{request_id}] 所有 {max_attempts} 个组合均失败 (last_error={last_error_message})")
 
         request_metadata = None
         if last_candidate:
@@ -675,9 +720,17 @@ class FallbackOrchestrator:
                 "api_format": api_format_enum.value,
             }
 
+        # 构造包含上游错误信息的消息
+        base_message = f"所有Provider均不可用，已尝试{max_attempts}个组合"
+        if last_error_message:
+            message = f"{base_message} (最后错误: {last_error_message})"
+        else:
+            message = base_message
+
         raise ProviderNotAvailableException(
-            f"所有Provider均不可用，已尝试{max_attempts}个组合",
+            message,
             request_metadata=request_metadata,
+            upstream_error=last_error_message,
         )
 
     async def execute_with_fallback(
