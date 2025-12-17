@@ -79,6 +79,18 @@ python generate_keys.py  # 生成密钥, 并将生成的密钥填入 .env
 ./deploy.sh
 ```
 
+### 健康检查（Zeabur/Kubernetes）
+
+- Zeabur 健康检查配置：`HTTP` / `GET` / `Path=/healthz`
+- （可选）就绪检查：`HTTP` / `GET` / `Path=/readyz`
+
+本地验证：
+
+```bash
+curl -i http://127.0.0.1:$PORT/healthz
+curl -i http://127.0.0.1:$PORT/readyz
+```
+
 ### 本地开发
 
 ```bash

@@ -42,6 +42,8 @@ class PluginMiddleware(BaseHTTPMiddleware):
         # 完全跳过限流的路径（静态资源、文档等）
         self.skip_rate_limit_paths = [
             "/health",
+            "/healthz",
+            "/readyz",
             "/docs",
             "/redoc",
             "/openapi.json",
@@ -66,6 +68,10 @@ class PluginMiddleware(BaseHTTPMiddleware):
         self, request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]
     ) -> StarletteResponse:
         """处理请求并调用相应插件"""
+
+        # 健康检查/就绪检查必须永远可用：绕过 DB/限流/插件逻辑，避免被中间件拦截或拖慢
+        if request.url.path in {"/healthz", "/healthz/", "/readyz", "/readyz/"}:
+            return await call_next(request)
 
         # 记录请求开始时间
         start_time = time.time()

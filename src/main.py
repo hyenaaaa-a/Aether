@@ -4,13 +4,15 @@
 """
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.admin import router as admin_router
@@ -33,6 +35,8 @@ from src.database import init_db
 from src.middleware.plugin_middleware import PluginMiddleware
 from src.plugins.manager import get_plugin_manager
 
+
+_PROCESS_START_MONOTONIC = time.monotonic()
 
 
 async def initialize_providers():
@@ -258,6 +262,68 @@ app = FastAPI(
     description="AI代理服务，采用模块化架构，支持插件化扩展",
     lifespan=lifespan,
 )
+
+
+@app.get("/healthz", include_in_schema=False)
+@app.get("/healthz/", include_in_schema=False)
+async def healthz():
+    """Kubernetes/Zeabur liveness probe: must be fast and never touch dependencies."""
+    return {
+        "ok": True,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "uptime": time.monotonic() - _PROCESS_START_MONOTONIC,
+    }
+
+
+@app.get("/readyz", include_in_schema=False)
+@app.get("/readyz/", include_in_schema=False)
+async def readyz():
+    """
+    Kubernetes readiness probe: checks critical dependencies with short timeouts (<=2s).
+
+    Notes:
+    - Reuses existing DB engine/session factory and the global Redis client initialized in lifespan.
+    - Does not create new long-lived connections.
+    """
+
+    timeout_seconds = 2.0
+    per_dependency_timeout = 1.0
+
+    async def check_db():
+        def _sync_check():
+            from sqlalchemy import text
+
+            from src.database import create_session
+
+            db = create_session()
+            try:
+                db.execute(text("SELECT 1"))
+            finally:
+                db.close()
+
+        await asyncio.wait_for(asyncio.to_thread(_sync_check), timeout=per_dependency_timeout)
+
+    async def check_redis():
+        if not config.require_redis:
+            return
+
+        from src.clients.redis_client import get_redis_client_sync
+
+        redis = get_redis_client_sync()
+        if redis is None:
+            raise RuntimeError("redis client is not initialized")
+
+        await asyncio.wait_for(redis.ping(), timeout=per_dependency_timeout)
+
+    try:
+        await asyncio.wait_for(check_db(), timeout=timeout_seconds)
+        await asyncio.wait_for(check_redis(), timeout=timeout_seconds)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "reason": str(e) or e.__class__.__name__},
+        )
 
 # 注册全局异常处理器
 # 注意：异常处理器的注册顺序很重要，必须先注册更通用的异常类型，再注册具体的
