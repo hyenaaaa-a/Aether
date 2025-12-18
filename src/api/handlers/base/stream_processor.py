@@ -9,7 +9,9 @@
 """
 
 import asyncio
+import codecs
 import json
+import time
 from typing import Any, AsyncGenerator, Callable, Optional
 
 import httpx
@@ -28,7 +30,6 @@ class StreamProcessor:
     流式响应处理器
 
     负责处理 SSE 流的解析、错误检测和响应生成。
-    从 ChatHandlerBase 中提取，使其职责更加单一。
     """
 
     def __init__(
@@ -36,25 +37,16 @@ class StreamProcessor:
         request_id: str,
         default_parser: ResponseParser,
         on_streaming_start: Optional[Callable[[], None]] = None,
-    ):
-        """
-        初始化流处理器
-
-        Args:
-            request_id: 请求 ID（用于日志）
-            default_parser: 默认响应解析器
-            on_streaming_start: 流开始时的回调（用于更新状态）
-        """
+        *,
+        collect_text: bool = False,
+    ) -> None:
         self.request_id = request_id
         self.default_parser = default_parser
         self.on_streaming_start = on_streaming_start
+        self.collect_text = collect_text
 
     def get_parser_for_provider(self, ctx: StreamContext) -> ResponseParser:
-        """
-        获取 Provider 格式的解析器
-
-        根据 Provider 的 API 格式选择正确的解析器。
-        """
+        """根据 Provider 的 api_format 选择对应的解析器"""
         if ctx.provider_api_format:
             try:
                 return get_parser_for_format(ctx.provider_api_format)
@@ -68,16 +60,7 @@ class StreamProcessor:
         event_name: Optional[str],
         data_str: str,
     ) -> None:
-        """
-        处理单个 SSE 事件
-
-        解析事件数据，提取 usage 信息和文本内容。
-
-        Args:
-            ctx: 流式上下文
-            event_name: 事件名称
-            data_str: 事件数据字符串
-        """
+        """处理单个 SSE 事件：解析 usage、收集文本、识别完成事件"""
         if not data_str:
             return
 
@@ -95,13 +78,10 @@ class StreamProcessor:
         if not isinstance(data, dict):
             return
 
-        # 收集原始 chunk 数据
         ctx.parsed_chunks.append(data)
 
-        # 根据 Provider 格式选择解析器
         parser = self.get_parser_for_provider(ctx)
 
-        # 使用解析器提取 usage
         usage = parser.extract_usage_from_response(data)
         if usage:
             ctx.update_usage(
@@ -111,19 +91,18 @@ class StreamProcessor:
                 cache_creation_tokens=usage.get("cache_creation_tokens"),
             )
 
-        # 提取文本
-        text = parser.extract_text_content(data)
-        if text:
-            ctx.collected_text += text
+        if self.collect_text:
+            text = parser.extract_text_content(data)
+            if text:
+                ctx.append_text(text)
 
-        # 检查完成
         event_type = event_name or data.get("type", "")
         if event_type in ("response.completed", "message_stop"):
             ctx.has_completion = True
 
     async def prefetch_and_check_error(
         self,
-        line_iterator: Any,
+        byte_iterator: Any,
         provider: Provider,
         endpoint: ProviderEndpoint,
         ctx: StreamContext,
@@ -132,129 +111,162 @@ class StreamProcessor:
         """
         预读流的前几行，检测嵌套错误
 
-        某些 Provider（如 Gemini）可能返回 HTTP 200，但在响应体中包含错误信息。
-        这种情况需要在流开始输出之前检测，以便触发重试逻辑。
-
-        Args:
-            line_iterator: 行迭代器
-            provider: Provider 对象
-            endpoint: Endpoint 对象
-            ctx: 流式上下文
-            max_prefetch_lines: 最多预读行数
-
-        Returns:
-            预读的行列表
-
-        Raises:
-            EmbeddedErrorException: 如果检测到嵌套错误
+        某些 Provider（如 Gemini）可能返回 HTTP 200，但在响应体中包含错误信息；
+        需要在流开始输出之前检测，以便触发重试逻辑。
         """
-        prefetched_lines: list = []
+        prefetched_chunks: list = []
         parser = self.get_parser_for_provider(ctx)
+        buffer = b""
+        line_count = 0
+        should_stop = False
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         try:
-            line_count = 0
-            async for line in line_iterator:
-                prefetched_lines.append(line)
-                line_count += 1
+            async for chunk in byte_iterator:
+                prefetched_chunks.append(chunk)
+                buffer += chunk
 
-                normalized_line = line.rstrip("\r")
-                if not normalized_line or normalized_line.startswith(":"):
-                    if line_count >= max_prefetch_lines:
+                while b"\n" in buffer:
+                    line_bytes, buffer = buffer.split(b"\n", 1)
+                    try:
+                        line = decoder.decode(line_bytes + b"\n", False).rstrip("\r\n")
+                    except Exception as e:
+                        logger.warning(
+                            f"[{self.request_id}] 预读时 UTF-8 解码失败: {e}, bytes={line_bytes[:50]!r}"
+                        )
+                        continue
+
+                    line_count += 1
+
+                    # 跳过空行和注释行
+                    if not line or line.startswith(":"):
+                        if line_count >= max_prefetch_lines:
+                            should_stop = True
+                            break
+                        continue
+
+                    data_str = line[6:] if line.startswith("data: ") else line
+                    if data_str == "[DONE]":
+                        should_stop = True
                         break
-                    continue
 
-                # 尝试解析 SSE 数据
-                data_str = normalized_line
-                if normalized_line.startswith("data: "):
-                    data_str = normalized_line[6:]
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        if line_count >= max_prefetch_lines:
+                            should_stop = True
+                            break
+                        continue
 
-                if data_str == "[DONE]":
+                    if isinstance(data, dict) and parser.is_error_response(data):
+                        parsed = parser.parse_response(data, 200)
+                        logger.warning(
+                            f"  [{self.request_id}] 检测到嵌套错误: "
+                            f"Provider={provider.name}, "
+                            f"error_type={parsed.error_type}, "
+                            f"message={parsed.error_message}"
+                        )
+                        raise EmbeddedErrorException(
+                            provider_name=str(provider.name),
+                            error_code=(
+                                int(parsed.error_type)
+                                if parsed.error_type and parsed.error_type.isdigit()
+                                else None
+                            ),
+                            error_message=parsed.error_message,
+                            error_status=parsed.error_type,
+                        )
+
+                    should_stop = True
                     break
 
-                try:
-                    data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    if line_count >= max_prefetch_lines:
-                        break
-                    continue
-
-                # 使用解析器检查是否为错误响应
-                if isinstance(data, dict) and parser.is_error_response(data):
-                    parsed = parser.parse_response(data, 200)
-                    logger.warning(
-                        f"  [{self.request_id}] 检测到嵌套错误: "
-                        f"Provider={provider.name}, "
-                        f"error_type={parsed.error_type}, "
-                        f"message={parsed.error_message}"
-                    )
-                    raise EmbeddedErrorException(
-                        provider_name=str(provider.name),
-                        error_code=(
-                            int(parsed.error_type)
-                            if parsed.error_type and parsed.error_type.isdigit()
-                            else None
-                        ),
-                        error_message=parsed.error_message,
-                        error_status=parsed.error_type,
-                    )
-
-                # 预读到有效数据，没有错误，停止预读
-                break
+                if should_stop or line_count >= max_prefetch_lines:
+                    break
 
         except EmbeddedErrorException:
             raise
         except Exception as e:
             logger.debug(f"  [{self.request_id}] 预读流时发生异常: {e}")
 
-        return prefetched_lines
+        return prefetched_chunks
 
     async def create_response_stream(
         self,
         ctx: StreamContext,
-        line_iterator: Any,
+        byte_iterator: Any,
         response_ctx: Any,
         http_client: httpx.AsyncClient,
-        prefetched_lines: Optional[list] = None,
+        prefetched_chunks: Optional[list] = None,
+        *,
+        start_time: Optional[float] = None,
     ) -> AsyncGenerator[bytes, None]:
         """
         创建响应流生成器
 
-        统一的流生成器，支持带预读数据和不带预读数据两种情况。
-
-        Args:
-            ctx: 流式上下文
-            line_iterator: 行迭代器
-            response_ctx: HTTP 响应上下文管理器
-            http_client: HTTP 客户端
-            prefetched_lines: 预读的行列表（可选）
-
-        Yields:
-            编码后的响应数据块
+        从字节流中解析 SSE 数据并转发，支持预读数据。
         """
         try:
             sse_parser = SSEEventParser()
             streaming_started = False
+            buffer = b""
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
-            # 处理预读数据
-            if prefetched_lines:
+            if prefetched_chunks:
                 if not streaming_started and self.on_streaming_start:
                     self.on_streaming_start()
                     streaming_started = True
 
-                for line in prefetched_lines:
-                    for chunk in self._process_line(ctx, sse_parser, line):
-                        yield chunk
+                for chunk in prefetched_chunks:
+                    if start_time is not None:
+                        ctx.record_first_byte_time(start_time)
+                        start_time = None
 
-            # 处理剩余的流数据
-            async for line in line_iterator:
-                if not streaming_started and self.on_streaming_start:
-                    self.on_streaming_start()
-                    streaming_started = True
-
-                for chunk in self._process_line(ctx, sse_parser, line):
                     yield chunk
 
-            # 处理剩余事件
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line_bytes, buffer = buffer.split(b"\n", 1)
+                        try:
+                            line = decoder.decode(line_bytes + b"\n", False)
+                            self._process_line(ctx, sse_parser, line)
+                        except Exception as e:
+                            logger.warning(
+                                f"[{self.request_id}] UTF-8 解码失败: {e}, bytes={line_bytes[:50]!r}"
+                            )
+                            continue
+
+            async for chunk in byte_iterator:
+                if not streaming_started and self.on_streaming_start:
+                    self.on_streaming_start()
+                    streaming_started = True
+
+                if start_time is not None:
+                    ctx.record_first_byte_time(start_time)
+                    start_time = None
+
+                yield chunk
+
+                buffer += chunk
+                while b"\n" in buffer:
+                    line_bytes, buffer = buffer.split(b"\n", 1)
+                    try:
+                        line = decoder.decode(line_bytes + b"\n", False)
+                        self._process_line(ctx, sse_parser, line)
+                    except Exception as e:
+                        logger.warning(
+                            f"[{self.request_id}] UTF-8 解码失败: {e}, bytes={line_bytes[:50]!r}"
+                        )
+                        continue
+
+            if buffer:
+                try:
+                    line = decoder.decode(buffer, True)
+                    self._process_line(ctx, sse_parser, line)
+                except Exception as e:
+                    logger.warning(
+                        f"[{self.request_id}] 处理剩余缓冲区失败: {e}, bytes={buffer[:50]!r}"
+                    )
+
             for event in sse_parser.flush():
                 self.handle_sse_event(ctx, event.get("event"), event.get("data") or "")
 
@@ -268,34 +280,23 @@ class StreamProcessor:
         ctx: StreamContext,
         sse_parser: SSEEventParser,
         line: str,
-    ) -> list[bytes]:
+    ) -> None:
         """
         处理单行数据
 
-        Args:
-            ctx: 流式上下文
-            sse_parser: SSE 解析器
-            line: 原始行数据
-
-        Returns:
-            要发送的数据块列表
+        SSEEventParser 以“去掉换行符”的单行文本作为输入；这里统一剔除 CR/LF，
+        避免把空行误判成 "\\n" 并导致事件边界解析错误。
         """
-        result: list[bytes] = []
-        normalized_line = line.rstrip("\r")
+        normalized_line = line.rstrip("\r\n")
         events = sse_parser.feed_line(normalized_line)
 
         if normalized_line == "":
             for event in events:
                 self.handle_sse_event(ctx, event.get("event"), event.get("data") or "")
-            result.append(b"\n")
         else:
             ctx.chunk_count += 1
-            result.append((line + "\n").encode("utf-8"))
-
             for event in events:
                 self.handle_sse_event(ctx, event.get("event"), event.get("data") or "")
-
-        return result
 
     async def create_monitored_stream(
         self,
@@ -304,25 +305,22 @@ class StreamProcessor:
         is_disconnected: Callable[[], Any],
     ) -> AsyncGenerator[bytes, None]:
         """
-        创建带监控的流生成器
-
-        检测客户端断开连接并更新状态码。
-
-        Args:
-            ctx: 流式上下文
-            stream_generator: 原始流生成器
-            is_disconnected: 检查客户端是否断开的函数
-
-        Yields:
-            响应数据块
+        创建带监控的流生成器：检测客户端断开连接并更新状态码
         """
         try:
+            # 断连检查节流：避免每个 chunk 都 await 带来的调度开销
+            next_disconnect_check_at = 0.0
+            disconnect_check_interval_s = 0.25
+
             async for chunk in stream_generator:
-                if await is_disconnected():
-                    logger.warning(f"ID:{self.request_id} | Client disconnected")
-                    ctx.status_code = 499  # Client Closed Request
-                    ctx.error_message = "client_disconnected"
-                    break
+                now = time.monotonic()
+                if now >= next_disconnect_check_at:
+                    next_disconnect_check_at = now + disconnect_check_interval_s
+                    if await is_disconnected():
+                        logger.warning(f"ID:{self.request_id} | Client disconnected")
+                        ctx.status_code = 499
+                        ctx.error_message = "client_disconnected"
+                        break
                 yield chunk
         except asyncio.CancelledError:
             ctx.status_code = 499
