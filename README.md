@@ -22,6 +22,9 @@
 
 Aether 是一个自托管的 AI API 网关，为团队和个人提供多租户管理、智能负载均衡、成本配额控制和健康监控能力。通过统一的 API 入口，可以无缝对接 Claude、OpenAI、Gemini 等主流 AI 服务及其 CLI 工具。
 
+> 本仓库为上游 Aether 的 Fork 版本，在原有能力基础上额外支持：模型拉取/同步、错误信息传递、自动兼容 OpenAI Response API 等功能（无需改动客户端）。  
+> 注意：本项目由上游较旧版本修改而来，可能缺少部分新特性。
+
 ### 页面预览
 
 | 首页 | 仪表盘 |
@@ -99,7 +102,8 @@ docker-compose -f docker-compose.build.yml up -d postgres redis
 
 # 后端
 uv sync
-./dev.sh
+./dev.sh        # macOS/Linux
+./run.ps1       # Windows (PowerShell)
 
 # 前端
 cd frontend && npm install && npm run dev
